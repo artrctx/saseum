@@ -16,10 +16,6 @@ var rootCmd = &cobra.Command{
 	Long:  `Implement search vector for using your own thing`,
 }
 
-func init() {
-
-}
-
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		panic(err)
