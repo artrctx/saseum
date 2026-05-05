@@ -3,11 +3,11 @@ all: build test
 
 build:
 	@echo "Building..."
-	@go build -o main cmd/cli/cli.go
+	@go build -o main cmd/cli/.
 
 # Run the application
 run:
-	@go run cmd/cli/cli.go
+	@go run cmd/cli/.
 
 playground:
 	@go run cmd/playground/main.go

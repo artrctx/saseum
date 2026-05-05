@@ -7,7 +7,7 @@ type Config struct {
 	Host     string
 	Port     uint16
 	Schema   string
-	SSLMode  string
+	SslMode  string
 }
 
 func ConfigFromConnStr(connStr string) Config {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"saseum/cmd/cli/db"
+
 	"github.com/spf13/cobra"
 )
 
@@ -12,8 +14,13 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "saseum",
-	Short: "Implement search vector for using your own thing",
-	Long:  `Implement search vector for using your own thing`,
+	Short: "Saseum means Deer.",
+	Long: `Saseum means Deer. 
+It does what deer does. Eating grass and jumping over cars and stuff.`,
+}
+
+func init() {
+	db.RegisterPostgresCommand(rootCmd)
 }
 
 func main() {
