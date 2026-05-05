@@ -1,5 +1,7 @@
 package db
 
+import "fmt"
+
 type Config struct {
 	Database string
 	Username string
@@ -10,6 +12,6 @@ type Config struct {
 	SslMode  string
 }
 
-func ConfigFromConnStr(connStr string) Config {
-	return Config{}
+func (c Config) ConnStr() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s&search_path=%s", c.Username, c.Password, c.Host, c.Port, c.Database, c.SslMode, c.Schema)
 }
