@@ -9,6 +9,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+// https://github.com/pgvector/pgvector/tree/master
 type Client struct {
 	db *sql.DB
 }

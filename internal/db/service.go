@@ -13,7 +13,7 @@ type client interface {
 }
 
 type Service struct {
-	client client
+	client
 }
 
 func New(connStr string) (*Service, error) {

@@ -7,7 +7,7 @@ build:
 
 # Run the application
 run:
-	@go run cmd/cli/.
+	@go run ./cmd/cli/. pg --host localhost --port 5432 --username postgres --database postgres
 
 playground:
 	@go run cmd/playground/main.go
@@ -37,18 +37,6 @@ db-up:
 
 db-down:
 	@docker compose -f docker-compose.$(db).yml down --volumes
-
-db-migrate:
-	@migrate create -ext sql -dir migrations -seq ${name}
-
-db-migrate-up:
-	@migrate -database postgres://postgres:password@localhost:5432/postgres?sslmode=disable -path migrations up
-	
-db-migrate-down:
-	@migrate -database postgres://postgres:password@localhost:5432/postgres?sslmode=disable -path migrations down
-
-db-repo-generate:
-	sqlc generate
 
 docker-nuke:
 	docker system prune --all --force --volumes
