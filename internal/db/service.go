@@ -1,61 +1,45 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
+	"io"
 	"log/slog"
+	"saseum/internal/db/pg"
 	"strings"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-type Source = string
-
-const (
-	Postgres Source = "postgres"
-	MySQL    Source = "mysql"
-)
+type client interface {
+	io.Closer
+}
 
 type Service struct {
-	src Source
-	db  *sql.DB
+	client client
 }
 
 func New(connStr string) (*Service, error) {
 	connSrc := strings.Split(connStr, "://")[0]
-	var driver string
-	var source Source
-	switch connSrc {
-	case "postgresql":
-		driver = "pgx"
-		source = Postgres
 
-	// TODO: Add in mysql support when ready
-	// "github.com/go-sql-driver/mysql"
-	// case "mysql":
-	// 	adapter = "mysql"
+	var client client
+	var err error
+	switch connSrc {
+	case "postgresql", "postgres":
+		client, err = pg.New(connStr)
+		// TODO: Add in mysql support when ready
+		// "github.com/go-sql-driver/mysql"
+	case "mysql":
 	default:
 		return nil, fmt.Errorf("%s is currently not supported", connSrc)
 	}
-
-	conn, err := sql.Open(driver, connStr)
 
 	if err != nil {
 		return nil, err
 	}
 
-	if err := conn.Ping(); err != nil {
-		if err := conn.Close(); err != nil {
-			slog.Error("Failed closing db conn after ping fail", slog.Any("error", err))
-		}
-		return nil, err
-	}
-
-	return &Service{source, conn}, nil
+	return &Service{client}, nil
 }
 
 func (s *Service) Close() {
-	if err := s.db.Close(); err != nil {
+	if err := s.client.Close(); err != nil {
 		slog.Error("Failed to close db connection", slog.Any("error", err))
 	}
 }

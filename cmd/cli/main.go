@@ -16,7 +16,8 @@ var rootCmd = &cobra.Command{
 	Use:   "saseum",
 	Short: "Saseum means Deer.",
 	Long: `Saseum means Deer. 
-It does what deer does. Eating grass and jumping over cars and stuff.`,
+It does what deer does.
+Eating grass and jumping over cars and stuff.`,
 }
 
 func init() {
