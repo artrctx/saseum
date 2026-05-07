@@ -52,7 +52,7 @@ func connStrFromFlag(cmd *cobra.Command) (string, error) {
 
 		// ask password
 		fmt.Print("Enter Password:")
-		bs, err := term.ReadPassword(syscall.Stdin)
+		pswd, err := term.ReadPassword(syscall.Stdin)
 		if err != nil {
 			return "", fmt.Errorf("Failed reading password error=%s", err)
 		}
@@ -61,7 +61,7 @@ func connStrFromFlag(cmd *cobra.Command) (string, error) {
 			config.DatabaseConfig{
 				Database: database,
 				Username: username,
-				Password: string(bs),
+				Password: string(pswd),
 				Host:     host,
 				Port:     port,
 				Schema:   schema,

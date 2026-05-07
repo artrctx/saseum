@@ -20,7 +20,7 @@ func New(connStr string) (*Client, error) {
 		return nil, err
 	}
 
-	if err := conn.Ping(); err != nil {
+	if _, err := conn.Exec("CREATE EXTENSION IF NOT EXISTS vector"); err != nil {
 		if err := conn.Close(); err != nil {
 			slog.Error("Failed closing postgres db conn after ping fail", slog.Any("error", err))
 		}
@@ -36,4 +36,9 @@ func ConnStrFromConfig(c config.DatabaseConfig) string {
 
 func (c *Client) Close() error {
 	return c.db.Close()
+}
+
+func (c *Client) Prepare() error {
+
+	return nil
 }
