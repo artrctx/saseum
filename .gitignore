@@ -33,6 +33,5 @@ go.work.sum
 main
 tmp
 
-# rsa keys
-private_key.pem
-public_key.pem
+# downloaded model path
+/models

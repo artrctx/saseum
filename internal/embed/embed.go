@@ -1,24 +1,39 @@
-// https://github.com/tmc/langchaingo/tree/main
+// https://github.com/gomlx/go-huggingface
+// https://github.com/gomlx/onnx-gomlx
 package embed
 
-import "github.com/tmc/langchaingo/llms/openai"
+import (
+	"fmt"
+	"os"
 
-type EmbeddingModel = string
+	"github.com/gomlx/go-huggingface/hub"
+)
+
+// huggingface model id
+type ModelID = string
 
 const (
-	TextEmbedding3Large EmbeddingModel = "text-embedding-3-large"
-	TextEmbedding3Small EmbeddingModel = "text-embedding-3-small"
+	E5LargeV2 ModelID = "intfloat/e5-large-v2"
+	E5BaseV2  ModelID = "intfloat/e5-base-v2"
 )
 
 type Client struct {
-	llm *openai.LLM
 }
 
+// https://www.datarobot.com/blog/choosing-the-right-vector-embedding-model-for-your-generative-ai-use-case/
+// TODO: support user provided model
 func New() (*Client, error) {
-	llm, err := openai.New(openai.WithEmbeddingModel(TextEmbedding3Large))
+	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
+	repo := hub.New(E5BaseV2).WithCacheDir(cwd + "/models").WithAuth(os.Getenv("HF_TOKEN"))
+	modelPath, err := repo.DownloadFile("onnx/model.onnx")
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("Model path", modelPath)
 
-	return &Client{llm}, nil
+	// Parse ONNX model.
+	return nil, nil
 }

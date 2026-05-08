@@ -9,6 +9,9 @@ build:
 run:
 	@go run ./cmd/cli/. pg --host localhost --port 5432 --username postgres --database postgres
 
+play:
+	@go run ./cmd/playground/.
+
 playground:
 	@go run cmd/playground/main.go
 
