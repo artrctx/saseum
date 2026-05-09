@@ -9,5 +9,5 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	e.Shape()
+	e.GenerateEmbedding("THIS IS TEST")
 }

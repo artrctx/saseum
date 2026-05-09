@@ -3,6 +3,7 @@
 package embed
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/gomlx/go-huggingface/hub"
@@ -75,9 +76,38 @@ func (c *Client) Shape() []int {
 
 // overlap .1 or .2 of token
 func (c *Client) GenerateEmbedding(text string) {
-	_ = c.tokenizer.Encode(text)
+	// _ = chunkWithOverlap(c.tokenizer.Encode(text), int(c.tokCfg.ModelMaxLength), int(c.tokCfg.ModelMaxLength*0.1))
+
+	set := make([]int, 0, 100)
+	for i := range 100 {
+		set = append(set, i)
+	}
+
+	fmt.Println(chunkWithOverlap(set, 10, 2))
 }
 
-// func chunkWithOverlap(set []int, chunkSize int, overlap float32) [][]int {
-// 	//todo
-// }
+// add guard
+func chunkWithOverlap(set []int, chunkSize, overlap int) [][]int {
+	maxLen, modChunkSize := len(set), chunkSize-overlap
+	steps := (maxLen / modChunkSize) + 1
+
+	chunked := make([][]int, 0, steps)
+	for step := range steps {
+		start := step * modChunkSize
+		end := start + modChunkSize + overlap
+
+		if end > maxLen {
+			end = maxLen
+		}
+
+		chunked = append(chunked, set[start:end])
+	}
+
+	lastChunkedLen := len(chunked[len(chunked)-1])
+	if lastChunkedLen < chunkSize {
+		// i should pad with actual pad id value
+		chunked[len(chunked)-1] = append(chunked[len(chunked)-1], make([]int, chunkSize-lastChunkedLen)...)
+	}
+
+	return chunked
+}
