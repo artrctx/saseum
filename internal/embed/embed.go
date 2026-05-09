@@ -3,16 +3,18 @@
 package embed
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/go-huggingface/tokenizers"
+	"github.com/gomlx/onnx-gomlx/onnx"
+	onnxGomlx "github.com/gomlx/onnx-gomlx/onnx/parser"
 )
 
 // huggingface model id
 type ModelCfg struct {
-	id   string
-	path string
+	id        string
+	modelPath string
 }
 
 var (
@@ -23,9 +25,15 @@ var (
 // https://github.com/gomlx/onnx-gomlx
 // https://github.com/gomlx/go-huggingface
 type Client struct {
-	modelPath string
+	encodingSize uint
+	hub          *hub.Repo
+	model        onnx.Model
+	tokenizer    tokenizers.Tokenizer
 }
 
+// should have fixed embedidng isze
+// TODO: if files downloaded i should be able to skip downloading tokenizer.json and model
+// ! Currently it still requires internet connection to verify all files are downloaded
 // provide supported model id declared here
 // this model needs to support onnx
 func New(cfg ModelCfg) (*Client, error) {
@@ -34,12 +42,36 @@ func New(cfg ModelCfg) (*Client, error) {
 		return nil, err
 	}
 	repo := hub.New(cfg.id).WithCacheDir(cwd + "/models").WithAuth(os.Getenv("HF_TOKEN"))
-	modelPath, err := repo.DownloadFile(cfg.path)
+	modelPath, err := repo.DownloadFile(cfg.modelPath)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Model path", modelPath)
 
-	// Parse ONNX model.
-	return nil, nil
+	model, err := onnxGomlx.ParseFile(modelPath)
+	if err != nil {
+		return nil, err
+	}
+
+	tok, err := tokenizers.New(repo)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Client{768, repo, model, tok}, nil
+}
+
+func (c *Client) WithEncodingSize(size uint) *Client {
+	c.encodingSize = size
+	return c
+}
+
+func (c *Client) CreateEmbedding(text string) {
+	// sentences := []string{
+	// 	"This is an example sentence",
+	// 	"Each sentence is converted"}
+
+	// for _, s := range sentences {
+	// 	enc := tok.Encode(s)
+	// 	fmt.Println(enc)
+	// }
 }
