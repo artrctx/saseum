@@ -7,6 +7,7 @@ import (
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/tokenizers"
+	"github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/gomlx/onnx-gomlx/onnx"
 	onnxGomlx "github.com/gomlx/onnx-gomlx/onnx/parser"
 )
@@ -15,23 +16,26 @@ import (
 type ModelCfg struct {
 	id        string
 	modelPath string
+	dim       int
 }
 
+// all dynamic input no need to pad chunked tokens
 var (
-	E5LargeV2 ModelCfg = ModelCfg{"intfloat/e5-large-v2", "onnx/model.onnx"}
-	E5BaseV2  ModelCfg = ModelCfg{"intfloat/e5-base-v2", "onnx/model.onnx"}
+	MiniLM    ModelCfg = ModelCfg{"sentence-transformers/all-MiniLM-L6-v2", "onnx/model.onnx", 384}
+	E5LargeV2 ModelCfg = ModelCfg{"intfloat/e5-large-v2", "onnx/model.onnx", 1024}
+	E5BaseV2  ModelCfg = ModelCfg{"intfloat/e5-base-v2", "onnx/model.onnx", 768}
 )
 
 // https://github.com/gomlx/onnx-gomlx
 // https://github.com/gomlx/go-huggingface
 type Client struct {
-	encodingSize uint
-	hub          *hub.Repo
-	model        onnx.Model
-	tokenizer    tokenizers.Tokenizer
+	cfg       ModelCfg
+	tokCfg    *api.Config
+	hub       *hub.Repo
+	model     onnx.Model
+	tokenizer tokenizers.Tokenizer
 }
 
-// should have fixed embedidng isze
 // TODO: if files downloaded i should be able to skip downloading tokenizer.json and model
 // ! Currently it still requires internet connection to verify all files are downloaded
 // provide supported model id declared here
@@ -57,21 +61,23 @@ func New(cfg ModelCfg) (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{768, repo, model, tok}, nil
+	return &Client{cfg, tok.Config(), repo, model, tok}, nil
 }
 
-func (c *Client) WithEncodingSize(size uint) *Client {
-	c.encodingSize = size
-	return c
+func (c *Client) Dim() int {
+	return c.cfg.dim
 }
 
-func (c *Client) CreateEmbedding(text string) {
-	// sentences := []string{
-	// 	"This is an example sentence",
-	// 	"Each sentence is converted"}
-
-	// for _, s := range sentences {
-	// 	enc := tok.Encode(s)
-	// 	fmt.Println(enc)
-	// }
+func (c *Client) Shape() []int {
+	_, shapes := c.model.Outputs()
+	return shapes[0].Dimensions
 }
+
+// overlap .1 or .2 of token
+func (c *Client) GenerateEmbedding(text string) {
+	_ = c.tokenizer.Encode(text)
+}
+
+// func chunkWithOverlap(set []int, chunkSize int, overlap float32) [][]int {
+// 	//todo
+// }
