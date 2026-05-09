@@ -10,25 +10,31 @@ import (
 )
 
 // huggingface model id
-type ModelID = string
-
-const (
-	E5LargeV2 ModelID = "intfloat/e5-large-v2"
-	E5BaseV2  ModelID = "intfloat/e5-base-v2"
-)
-
-type Client struct {
+type ModelCfg struct {
+	id   string
+	path string
 }
 
-// https://www.datarobot.com/blog/choosing-the-right-vector-embedding-model-for-your-generative-ai-use-case/
-// TODO: support user provided model
-func New() (*Client, error) {
+var (
+	E5LargeV2 ModelCfg = ModelCfg{"intfloat/e5-large-v2", "onnx/model.onnx"}
+	E5BaseV2  ModelCfg = ModelCfg{"intfloat/e5-base-v2", "onnx/model.onnx"}
+)
+
+// https://github.com/gomlx/onnx-gomlx
+// https://github.com/gomlx/go-huggingface
+type Client struct {
+	modelPath string
+}
+
+// provide supported model id declared here
+// this model needs to support onnx
+func New(cfg ModelCfg) (*Client, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	repo := hub.New(E5BaseV2).WithCacheDir(cwd + "/models").WithAuth(os.Getenv("HF_TOKEN"))
-	modelPath, err := repo.DownloadFile("onnx/model.onnx")
+	repo := hub.New(cfg.id).WithCacheDir(cwd + "/models").WithAuth(os.Getenv("HF_TOKEN"))
+	modelPath, err := repo.DownloadFile(cfg.path)
 	if err != nil {
 		return nil, err
 	}
