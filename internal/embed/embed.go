@@ -5,12 +5,15 @@ package embed
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/tokenizers"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/gomlx/onnx-gomlx/onnx"
 	onnxGomlx "github.com/gomlx/onnx-gomlx/onnx/parser"
+	"golang.org/x/sync/errgroup"
 )
 
 // huggingface model id
@@ -109,9 +112,46 @@ func (c *Client) Shape() []int {
 }
 
 // overlap .1 or .2 of token
-func (c *Client) GenerateEmbedding(text string) {
-	chunks, err := chunkWithOverlap(c.tokenizer.Encode(text), int(c.meta.maxTokenLen), int(c.meta.maxTokenLen*0.1), c.meta)
-	fmt.Println(chunks, err)
+
+func (c *Client) GenerateEmbedding(text string) (string, error) {
+	cks, err := c.encodeChunked(text)
+	fmt.Println(cks, err)
+
+	return "", nil
+}
+
+func (c *Client) encodeChunked(text string) ([][]int, error) {
+	sChunks := semanticChunks(text)
+
+	g := errgroup.Group{}
+	chunkChan := make(chan [][]int, len(sChunks))
+	for _, s := range sChunks {
+		// cs, err := chunkWithOverlap(c.tokenizer.Encode(s), int(c.meta.maxTokenLen), int(c.meta.maxTokenLen*0.1), c.meta)
+		g.Go(func() error {
+			chunks, err := chunkWithOverlap(c.tokenizer.Encode(s), int(c.meta.maxTokenLen), int(c.meta.maxTokenLen*0.1), c.meta)
+			if err != nil {
+				return err
+			}
+			chunkChan <- chunks
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	close(chunkChan)
+
+	var chunks [][]int
+	for c := range chunkChan {
+		chunks = append(chunks, c...)
+	}
+	return chunks, nil
+}
+
+// replaces \r\n -> \n and \n{3,} (over 3 lines of space) -> \n\n and split to semantic chunks by double new line
+func semanticChunks(s string) []string {
+	return strings.Split(regexp.MustCompile(`\n{3,}`).ReplaceAllString(strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n")), "\n\n"), "\n\n")
 }
 
 // add guard
