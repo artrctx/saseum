@@ -5,10 +5,9 @@ import (
 )
 
 func main() {
-	e, err := embed.New(embed.E5BaseV2)
+	e, err := embed.New(embed.MiniLM)
 	if err != nil {
 		panic(err)
 	}
 	e.Generate("THIS IS TEST")
-
 }

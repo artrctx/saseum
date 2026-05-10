@@ -8,9 +8,12 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gomlx/compute"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/tokenizers"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
+	"github.com/gomlx/gomlx/pkg/core/graph"
+	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/onnx-gomlx/onnx"
 	onnxGomlx "github.com/gomlx/onnx-gomlx/onnx/parser"
 	"golang.org/x/sync/errgroup"
@@ -44,6 +47,7 @@ type metadata struct {
 type Client struct {
 	hub       *hub.Repo
 	model     onnx.Model
+	backend   *context.Exec
 	tokenizer tokenizers.Tokenizer
 	meta      metadata
 }
@@ -52,12 +56,40 @@ type Client struct {
 // ! Currently it still requires internet connection to verify all files are downloaded
 // provide supported model id declared here
 // this model needs to support onnx
+// set backend to use with GOMLX_BACKEND env
 func New(cfg ModelCfg) (*Client, error) {
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 	repo := hub.New(cfg.id).WithCacheDir(cwd + "/models").WithAuth(os.Getenv("HF_TOKEN"))
+	//prep tokenizer
+	tok, err := tokenizers.New(repo)
+	if err != nil {
+		return nil, err
+	}
+	// Get Metadata Tokens
+	padID, err := tok.SpecialTokenID(api.TokPad)
+	if err != nil {
+		return nil, err
+	}
+	beginID, err := tok.SpecialTokenID(api.TokBeginningOfSentence)
+	if err != nil {
+		return nil, err
+	}
+	endID, err := tok.SpecialTokenID(api.TokEndOfSentence)
+	if err != nil {
+		return nil, err
+	}
+
+	// prepare compute backend
+	backend, err := compute.New()
+	if err != nil {
+		return nil, err
+	}
+
+	//prep models
 	modelPath, err := repo.DownloadFile(cfg.modelPath)
 	if err != nil {
 		return nil, err
@@ -68,29 +100,21 @@ func New(cfg ModelCfg) (*Client, error) {
 		return nil, err
 	}
 
-	tok, err := tokenizers.New(repo)
-	if err != nil {
-		model.Close()
-		return nil, err
-	}
-	// Get Metadata Tokens
-	padID, err := tok.SpecialTokenID(api.TokPad)
-	if err != nil {
-		model.Close()
-		return nil, err
-	}
-	beginID, err := tok.SpecialTokenID(api.TokBeginningOfSentence)
-	if err != nil {
-		model.Close()
-		return nil, err
-	}
-	endID, err := tok.SpecialTokenID(api.TokEndOfSentence)
+	// update this
+	exec, err := context.NewExec(backend, context.New(), func(ctx *context.Context, inputIds, attentionMask *graph.Node) []*graph.Node {
+		inputs := map[string]*graph.Node{
+			"input_ids":      inputIds,
+			"attention_mask": attentionMask,
+		}
+
+		return model.CallGraph(ctx, inputIds.Graph(), inputs)
+	})
 	if err != nil {
 		model.Close()
 		return nil, err
 	}
 
-	return &Client{repo, model, tok, metadata{
+	return &Client{repo, model, exec, tok, metadata{
 		outputDim:    cfg.dim,
 		maxTokenLen:  float32(tok.Config().ModelMaxLength),
 		padID:        padID,
@@ -116,8 +140,10 @@ func (c *Client) Shape() []int {
 // overlap .1 or .2 of token
 // generates embedding
 func (c *Client) Generate(text string) (string, error) {
-	cks, err := c.encodeChunked(text)
-	fmt.Println(cks, err)
+	_, err := c.encodeChunked(text)
+	if err != nil {
+		return "", err
+	}
 
 	return "", nil
 }
@@ -149,6 +175,19 @@ func (c *Client) encodeChunked(text string) ([][]int, error) {
 		chunks = append(chunks, c...)
 	}
 	return chunks, nil
+}
+
+// real token  -> 1
+// padding     -> 0
+func buildAttentionMask(ids []int, padID int) []int {
+	masks := make([]int, len(ids))
+	for idx, id := range ids {
+		if id == padID {
+			continue
+		}
+		masks[idx] = 1
+	}
+	return masks
 }
 
 // replaces \r\n -> \n and \n{3,} (over 3 lines of space) -> \n\n and split to semantic chunks by double new line

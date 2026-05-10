@@ -3,7 +3,9 @@ module saseum
 go 1.26.2
 
 require (
+	github.com/gomlx/compute v0.0.0-20260505150002-d9c293abe497
 	github.com/gomlx/go-huggingface v0.3.6-0.20260506031208-47690ea4dbc9
+	github.com/gomlx/gomlx v0.27.4-0.20260506031059-abeda22e1ed4
 	github.com/gomlx/onnx-gomlx v0.4.3-0.20260506031237-c60c18352264
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/spf13/cobra v1.10.2
@@ -15,9 +17,7 @@ require (
 	github.com/eliben/go-sentencepiece v0.7.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/gofrs/flock v0.13.0 // indirect
-	github.com/gomlx/compute v0.0.0-20260505150002-d9c293abe497 // indirect
 	github.com/gomlx/exceptions v0.0.3 // indirect
-	github.com/gomlx/gomlx v0.27.4-0.20260506031059-abeda22e1ed4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
