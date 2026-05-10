@@ -28,9 +28,12 @@ type ModelCfg struct {
 
 // all dynamic input no need to pad chunked tokens
 var (
-	MiniLM    ModelCfg = ModelCfg{"sentence-transformers/all-MiniLM-L6-v2", "onnx/model.onnx", 384}
+	// inputs : [input_ids attention_mask token_type_ids]
+	MiniLM ModelCfg = ModelCfg{"sentence-transformers/all-MiniLM-L6-v2", "onnx/model.onnx", 384}
+	// inputs : [input_ids attention_mask token_type_ids]
 	E5LargeV2 ModelCfg = ModelCfg{"intfloat/e5-large-v2", "onnx/model.onnx", 1024}
-	E5BaseV2  ModelCfg = ModelCfg{"intfloat/e5-base-v2", "onnx/model.onnx", 768}
+	// inputs : [input_ids attention_mask token_type_ids]
+	E5BaseV2 ModelCfg = ModelCfg{"intfloat/e5-base-v2", "onnx/model.onnx", 768}
 )
 
 type metadata struct {
@@ -44,7 +47,7 @@ type metadata struct {
 
 // https://github.com/gomlx/onnx-gomlx
 // https://github.com/gomlx/go-huggingface
-type Client struct {
+type Embedder struct {
 	hub       *hub.Repo
 	model     onnx.Model
 	exec      *context.Exec
@@ -57,7 +60,7 @@ type Client struct {
 // provide supported model id declared here
 // this model needs to support onnx
 // set backend to use with GOMLX_BACKEND env
-func New(cfg ModelCfg) (*Client, error) {
+func New(cfg ModelCfg) (*Embedder, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -98,21 +101,28 @@ func New(cfg ModelCfg) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctx := context.New()
+	if err := model.VariablesToContext(ctx); err != nil {
+		model.Close()
+		return nil, err
+	}
 
-	exec, err := context.NewExec(backend, context.New(), func(ctx *context.Context, inputIds, attentionMask *graph.Node) []*graph.Node {
-		inputs := map[string]*graph.Node{
+	//! match input nmes
+	inputName, _ := model.Inputs()
+	fmt.Println(inputName)
+	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, inputIds, attentionMask, tokenTypeIds *graph.Node) []*graph.Node {
+		return model.CallGraph(ctx, inputIds.Graph(), map[string]*graph.Node{
 			"input_ids":      inputIds,
 			"attention_mask": attentionMask,
-		}
-
-		return model.CallGraph(ctx, inputIds.Graph(), inputs)
+			"token_type_ids": tokenTypeIds,
+		})
 	})
 	if err != nil {
 		model.Close()
 		return nil, err
 	}
 
-	return &Client{repo, model, exec, tok, metadata{
+	return &Embedder{repo, model, exec, tok, metadata{
 		outputDim:    cfg.dim,
 		maxTokenLen:  float32(tok.Config().ModelMaxLength),
 		padID:        padID,
@@ -122,40 +132,47 @@ func New(cfg ModelCfg) (*Client, error) {
 	}}, nil
 }
 
-func (c *Client) Close() error {
-	c.exec.Finalize()
-	return c.model.Close()
+func (e *Embedder) Close() error {
+	e.exec.Finalize()
+	return e.model.Close()
 }
 
-func (c *Client) Dim() int {
-	return c.meta.outputDim
+func (e *Embedder) Dim() int {
+	return e.meta.outputDim
 }
 
-func (c *Client) Shape() []int {
-	_, shapes := c.model.Outputs()
+func (e *Embedder) Shape() []int {
+	_, shapes := e.model.Outputs()
 	return shapes[0].Dimensions
 }
 
 // overlap .1 or .2 of token
 // generates embedding
-func (c *Client) Generate(text string) (string, error) {
-	_, err := c.encodeChunked(text)
+func (e *Embedder) Generate(text string) (string, error) {
+	chunks, err := e.encodeChunked(text)
 	if err != nil {
 		return "", err
 	}
 
+	tensor, err := e.exec.Exec(chunks, buildAttentionMasks(chunks, e.meta.padID), buildTokenTypeIds(len(chunks), len(chunks[0])))
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Println(tensor)
+	// need to implement mean pooling
+
 	return "", nil
 }
 
-func (c *Client) encodeChunked(text string) ([][]int, error) {
+func (e *Embedder) encodeChunked(text string) ([][]int, error) {
 	sChunks := semanticChunks(text)
 
 	g := errgroup.Group{}
 	chunkChan := make(chan [][]int, len(sChunks))
 	for _, s := range sChunks {
-		// cs, err := chunkWithOverlap(c.tokenizer.Encode(s), int(c.meta.maxTokenLen), int(c.meta.maxTokenLen*0.1), c.meta)
 		g.Go(func() error {
-			chunks, err := chunkWithOverlap(c.tokenizer.Encode(s), int(c.meta.maxTokenLen), int(c.meta.maxTokenLen*c.meta.chunkOverlap), c.meta.beginID, c.meta.endID, c.meta.padID)
+			chunks, err := chunkWithOverlap(e.tokenizer.Encode(s), int(e.meta.maxTokenLen), int(e.meta.maxTokenLen*e.meta.chunkOverlap), e.meta.beginID, e.meta.endID, e.meta.padID)
 			if err != nil {
 				return err
 			}
@@ -177,15 +194,32 @@ func (c *Client) encodeChunked(text string) ([][]int, error) {
 }
 
 // real token -> 1 || padding -> 0
-func buildAttentionMask(ids []int, padID int) []int {
-	masks := make([]int, len(ids))
-	for idx, id := range ids {
-		if id == padID {
-			continue
+func buildAttentionMasks(ids [][]int, padID int) [][]int {
+	idsLen, maskLen := len(ids), len(ids[0])
+	maskSet := make([][]int, 0, idsLen)
+	for idx := range idsLen {
+		masks := make([]int, maskLen)
+
+		for idx, id := range ids[idx] {
+			if id == padID {
+				continue
+			}
+
+			masks[idx] = 1
 		}
-		masks[idx] = 1
+
+		maskSet = append(maskSet, masks)
 	}
-	return masks
+	return maskSet
+}
+
+// zeroed out slice
+func buildTokenTypeIds(count, size int) [][]int {
+	set := make([][]int, 0, count)
+	for range count {
+		set = append(set, make([]int, size))
+	}
+	return set
 }
 
 // replaces \r\n -> \n and \n{3,} (over 3 lines of space) -> \n\n and split to semantic chunks by double new line

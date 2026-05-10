@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"saseum/internal/embed"
 )
 
@@ -9,5 +10,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	e.Generate("This is an example sentence\n\nEach sentence is converted")
+	val, err := e.Generate("This is an example sentence\n\nEach sentence is converted")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(val)
 }
