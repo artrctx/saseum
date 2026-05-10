@@ -31,11 +31,12 @@ var (
 )
 
 type metadata struct {
-	outputDim   int
-	maxTokenLen float64
-	padID       int
-	beginID     int
-	endID       int
+	outputDim    int
+	maxTokenLen  float32
+	padID        int
+	beginID      int
+	endID        int
+	chunkOverlap float32
 }
 
 // https://github.com/gomlx/onnx-gomlx
@@ -90,11 +91,12 @@ func New(cfg ModelCfg) (*Client, error) {
 	}
 
 	return &Client{repo, model, tok, metadata{
-		outputDim:   cfg.dim,
-		maxTokenLen: tok.Config().ModelMaxLength,
-		padID:       padID,
-		beginID:     beginID,
-		endID:       endID,
+		outputDim:    cfg.dim,
+		maxTokenLen:  float32(tok.Config().ModelMaxLength),
+		padID:        padID,
+		beginID:      beginID,
+		endID:        endID,
+		chunkOverlap: 0.1,
 	}}, nil
 }
 
@@ -112,8 +114,8 @@ func (c *Client) Shape() []int {
 }
 
 // overlap .1 or .2 of token
-
-func (c *Client) GenerateEmbedding(text string) (string, error) {
+// generates embedding
+func (c *Client) Generate(text string) (string, error) {
 	cks, err := c.encodeChunked(text)
 	fmt.Println(cks, err)
 
@@ -128,7 +130,7 @@ func (c *Client) encodeChunked(text string) ([][]int, error) {
 	for _, s := range sChunks {
 		// cs, err := chunkWithOverlap(c.tokenizer.Encode(s), int(c.meta.maxTokenLen), int(c.meta.maxTokenLen*0.1), c.meta)
 		g.Go(func() error {
-			chunks, err := chunkWithOverlap(c.tokenizer.Encode(s), int(c.meta.maxTokenLen), int(c.meta.maxTokenLen*0.1), c.meta)
+			chunks, err := chunkWithOverlap(c.tokenizer.Encode(s), int(c.meta.maxTokenLen), int(c.meta.maxTokenLen*c.meta.chunkOverlap), c.meta.beginID, c.meta.endID, c.meta.padID)
 			if err != nil {
 				return err
 			}
@@ -151,18 +153,23 @@ func (c *Client) encodeChunked(text string) ([][]int, error) {
 
 // replaces \r\n -> \n and \n{3,} (over 3 lines of space) -> \n\n and split to semantic chunks by double new line
 func semanticChunks(s string) []string {
-	return strings.Split(regexp.MustCompile(`\n{3,}`).ReplaceAllString(strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n")), "\n\n"), "\n\n")
+	splitStr := strings.Split(regexp.MustCompile(`\n{3,}`).ReplaceAllString(strings.ReplaceAll(strings.TrimSpace(s), "\r\n", "\n"), "\n\n"), "\n\n")
+	strs := make([]string, 0, len(splitStr))
+	for _, s := range splitStr {
+		strs = append(strs, strings.TrimSpace(s))
+	}
+	return strs
 }
 
 // add guard
-func chunkWithOverlap(set []int, chunkSize, overlap int, meta metadata) ([][]int, error) {
+func chunkWithOverlap(set []int, chunkSize, overlap int, beginID, endID, padID int) ([][]int, error) {
 	if chunkSize <= overlap {
 		return nil, fmt.Errorf("chunk size cannot be equal or smaller than overlap received chunk size = %d, overlap = %d", chunkSize, overlap)
 	}
 
 	// removing begin and end token id to be chunked and added back
 	fTkn, lTkn := set[0], set[len(set)-1]
-	if fTkn == meta.beginID && lTkn == meta.endID {
+	if fTkn == beginID && lTkn == endID {
 		set = set[1 : len(set)-1]
 	}
 
@@ -179,8 +186,8 @@ func chunkWithOverlap(set []int, chunkSize, overlap int, meta metadata) ([][]int
 		}
 
 		chunk := set[start:end]
-		chunk = append([]int{meta.beginID}, set[start:end]...)
-		chunk = append(chunk, meta.endID)
+		chunk = append([]int{beginID}, set[start:end]...)
+		chunk = append(chunk, endID)
 
 		chunked = append(chunked, chunk)
 	}
@@ -192,7 +199,7 @@ func chunkWithOverlap(set []int, chunkSize, overlap int, meta metadata) ([][]int
 
 	// padding last chunk
 	for range chunkSize - lastChunkedLen {
-		chunked[len(chunked)-1] = append(chunked[len(chunked)-1], meta.padID)
+		chunked[len(chunked)-1] = append(chunked[len(chunked)-1], padID)
 	}
 
 	return chunked, nil

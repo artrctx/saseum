@@ -9,6 +9,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	e.GenerateEmbedding("THIS IS TEST")
+	e.Generate("THIS IS TEST")
 
 }
