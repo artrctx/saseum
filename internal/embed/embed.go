@@ -31,6 +31,8 @@ type metadata struct {
 	outputDim   int
 	maxTokenLen float64
 	padID       int
+	beginID     int
+	endID       int
 }
 
 // https://github.com/gomlx/onnx-gomlx
@@ -39,7 +41,7 @@ type Client struct {
 	hub       *hub.Repo
 	model     onnx.Model
 	tokenizer tokenizers.Tokenizer
-	metadata
+	meta      metadata
 }
 
 // TODO: if files downloaded i should be able to skip downloading tokenizer.json and model
@@ -64,10 +66,23 @@ func New(cfg ModelCfg) (*Client, error) {
 
 	tok, err := tokenizers.New(repo)
 	if err != nil {
+		model.Close()
 		return nil, err
 	}
+	// Get Metadata Tokens
 	padID, err := tok.SpecialTokenID(api.TokPad)
 	if err != nil {
+		model.Close()
+		return nil, err
+	}
+	beginID, err := tok.SpecialTokenID(api.TokBeginningOfSentence)
+	if err != nil {
+		model.Close()
+		return nil, err
+	}
+	endID, err := tok.SpecialTokenID(api.TokEndOfSentence)
+	if err != nil {
+		model.Close()
 		return nil, err
 	}
 
@@ -75,11 +90,17 @@ func New(cfg ModelCfg) (*Client, error) {
 		outputDim:   cfg.dim,
 		maxTokenLen: tok.Config().ModelMaxLength,
 		padID:       padID,
+		beginID:     beginID,
+		endID:       endID,
 	}}, nil
 }
 
+func (c *Client) Close() error {
+	return c.model.Close()
+}
+
 func (c *Client) Dim() int {
-	return c.outputDim
+	return c.meta.outputDim
 }
 
 func (c *Client) Shape() []int {
@@ -89,15 +110,23 @@ func (c *Client) Shape() []int {
 
 // overlap .1 or .2 of token
 func (c *Client) GenerateEmbedding(text string) {
-	_, _ = chunkWithOverlap(c.tokenizer.Encode(text), int(c.maxTokenLen), int(c.maxTokenLen*0.1), c.padID)
+	chunks, err := chunkWithOverlap(c.tokenizer.Encode(text), int(c.meta.maxTokenLen), int(c.meta.maxTokenLen*0.1), c.meta)
+	fmt.Println(chunks, err)
 }
 
 // add guard
-func chunkWithOverlap(set []int, chunkSize, overlap, padID int) ([][]int, error) {
+func chunkWithOverlap(set []int, chunkSize, overlap int, meta metadata) ([][]int, error) {
 	if chunkSize <= overlap {
 		return nil, fmt.Errorf("chunk size cannot be equal or smaller than overlap received chunk size = %d, overlap = %d", chunkSize, overlap)
 	}
-	maxLen, modChunkSize := len(set), chunkSize-overlap
+
+	// removing begin and end token id to be chunked and added back
+	fTkn, lTkn := set[0], set[len(set)-1]
+	if fTkn == meta.beginID && lTkn == meta.endID {
+		set = set[1 : len(set)-1]
+	}
+
+	maxLen, modChunkSize := len(set), chunkSize-overlap-2
 	steps := (maxLen / modChunkSize) + 1
 
 	chunked := make([][]int, 0, steps)
@@ -109,7 +138,11 @@ func chunkWithOverlap(set []int, chunkSize, overlap, padID int) ([][]int, error)
 			end = maxLen
 		}
 
-		chunked = append(chunked, set[start:end])
+		chunk := set[start:end]
+		chunk = append([]int{meta.beginID}, set[start:end]...)
+		chunk = append(chunk, meta.endID)
+
+		chunked = append(chunked, chunk)
 	}
 
 	lastChunkedLen := len(chunked[len(chunked)-1])
@@ -119,7 +152,7 @@ func chunkWithOverlap(set []int, chunkSize, overlap, padID int) ([][]int, error)
 
 	// padding last chunk
 	for range chunkSize - lastChunkedLen {
-		chunked[len(chunked)-1] = append(chunked[len(chunked)-1], padID)
+		chunked[len(chunked)-1] = append(chunked[len(chunked)-1], meta.padID)
 	}
 
 	return chunked, nil
