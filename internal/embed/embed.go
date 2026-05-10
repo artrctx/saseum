@@ -47,7 +47,7 @@ type metadata struct {
 type Client struct {
 	hub       *hub.Repo
 	model     onnx.Model
-	backend   *context.Exec
+	exec      *context.Exec
 	tokenizer tokenizers.Tokenizer
 	meta      metadata
 }
@@ -58,13 +58,12 @@ type Client struct {
 // this model needs to support onnx
 // set backend to use with GOMLX_BACKEND env
 func New(cfg ModelCfg) (*Client, error) {
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 	repo := hub.New(cfg.id).WithCacheDir(cwd + "/models").WithAuth(os.Getenv("HF_TOKEN"))
-	//prep tokenizer
+	// ----------- TOKENIZER -----------
 	tok, err := tokenizers.New(repo)
 	if err != nil {
 		return nil, err
@@ -83,7 +82,7 @@ func New(cfg ModelCfg) (*Client, error) {
 		return nil, err
 	}
 
-	// prepare compute backend
+	// ----------- MODEL & EXECUTOR -----------
 	backend, err := compute.New()
 	if err != nil {
 		return nil, err
@@ -100,7 +99,6 @@ func New(cfg ModelCfg) (*Client, error) {
 		return nil, err
 	}
 
-	// update this
 	exec, err := context.NewExec(backend, context.New(), func(ctx *context.Context, inputIds, attentionMask *graph.Node) []*graph.Node {
 		inputs := map[string]*graph.Node{
 			"input_ids":      inputIds,
@@ -125,6 +123,7 @@ func New(cfg ModelCfg) (*Client, error) {
 }
 
 func (c *Client) Close() error {
+	c.exec.Finalize()
 	return c.model.Close()
 }
 
@@ -177,8 +176,7 @@ func (c *Client) encodeChunked(text string) ([][]int, error) {
 	return chunks, nil
 }
 
-// real token  -> 1
-// padding     -> 0
+// real token -> 1 || padding -> 0
 func buildAttentionMask(ids []int, padID int) []int {
 	masks := make([]int, len(ids))
 	for idx, id := range ids {
@@ -200,7 +198,6 @@ func semanticChunks(s string) []string {
 	return strs
 }
 
-// add guard
 func chunkWithOverlap(set []int, chunkSize, overlap int, beginID, endID, padID int) ([][]int, error) {
 	if chunkSize <= overlap {
 		return nil, fmt.Errorf("chunk size cannot be equal or smaller than overlap received chunk size = %d, overlap = %d", chunkSize, overlap)

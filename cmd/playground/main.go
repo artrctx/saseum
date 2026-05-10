@@ -9,5 +9,5 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	e.Generate("THIS IS TEST")
+	e.Generate("This is an example sentence\n\nEach sentence is converted")
 }
