@@ -27,14 +27,19 @@ var (
 	E5BaseV2  ModelCfg = ModelCfg{"intfloat/e5-base-v2", "onnx/model.onnx", 768}
 )
 
+type metadata struct {
+	outputDim   int
+	maxTokenLen float64
+	padID       int
+}
+
 // https://github.com/gomlx/onnx-gomlx
 // https://github.com/gomlx/go-huggingface
 type Client struct {
-	cfg       ModelCfg
-	tokCfg    *api.Config
 	hub       *hub.Repo
 	model     onnx.Model
 	tokenizer tokenizers.Tokenizer
+	metadata
 }
 
 // TODO: if files downloaded i should be able to skip downloading tokenizer.json and model
@@ -61,12 +66,20 @@ func New(cfg ModelCfg) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	padID, err := tok.SpecialTokenID(api.TokPad)
+	if err != nil {
+		return nil, err
+	}
 
-	return &Client{cfg, tok.Config(), repo, model, tok}, nil
+	return &Client{repo, model, tok, metadata{
+		outputDim:   cfg.dim,
+		maxTokenLen: tok.Config().ModelMaxLength,
+		padID:       padID,
+	}}, nil
 }
 
 func (c *Client) Dim() int {
-	return c.cfg.dim
+	return c.outputDim
 }
 
 func (c *Client) Shape() []int {
@@ -76,18 +89,14 @@ func (c *Client) Shape() []int {
 
 // overlap .1 or .2 of token
 func (c *Client) GenerateEmbedding(text string) {
-	// _ = chunkWithOverlap(c.tokenizer.Encode(text), int(c.tokCfg.ModelMaxLength), int(c.tokCfg.ModelMaxLength*0.1))
-
-	set := make([]int, 0, 100)
-	for i := range 100 {
-		set = append(set, i)
-	}
-
-	fmt.Println(chunkWithOverlap(set, 10, 2))
+	_, _ = chunkWithOverlap(c.tokenizer.Encode(text), int(c.maxTokenLen), int(c.maxTokenLen*0.1), c.padID)
 }
 
 // add guard
-func chunkWithOverlap(set []int, chunkSize, overlap int) [][]int {
+func chunkWithOverlap(set []int, chunkSize, overlap, padID int) ([][]int, error) {
+	if chunkSize <= overlap {
+		return nil, fmt.Errorf("chunk size cannot be equal or smaller than overlap received chunk size = %d, overlap = %d", chunkSize, overlap)
+	}
 	maxLen, modChunkSize := len(set), chunkSize-overlap
 	steps := (maxLen / modChunkSize) + 1
 
@@ -104,10 +113,14 @@ func chunkWithOverlap(set []int, chunkSize, overlap int) [][]int {
 	}
 
 	lastChunkedLen := len(chunked[len(chunked)-1])
-	if lastChunkedLen < chunkSize {
-		// i should pad with actual pad id value
-		chunked[len(chunked)-1] = append(chunked[len(chunked)-1], make([]int, chunkSize-lastChunkedLen)...)
+	if lastChunkedLen == chunkSize {
+		return chunked, nil
 	}
 
-	return chunked
+	// padding last chunk
+	for range chunkSize - lastChunkedLen {
+		chunked[len(chunked)-1] = append(chunked[len(chunked)-1], padID)
+	}
+
+	return chunked, nil
 }
