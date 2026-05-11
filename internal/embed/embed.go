@@ -4,6 +4,7 @@ package embed
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -244,8 +245,9 @@ func chunkWithOverlap(set []int, chunkSize, overlap int, beginID, endID, padID i
 	}
 
 	maxLen, modChunkSize := len(set), chunkSize-overlap-2
-	steps := (maxLen / modChunkSize) + 1
+	steps := int(math.Ceil(float64(maxLen) / float64(modChunkSize)))
 
+	// 100 12 2
 	chunked := make([][]int, 0, steps)
 	for step := range steps {
 		start := step * modChunkSize
