@@ -21,7 +21,7 @@ import (
 )
 
 // huggingface model id
-type ModelCfg struct {
+type ModelID struct {
 	id        string
 	modelPath string
 	dim       int
@@ -29,12 +29,15 @@ type ModelCfg struct {
 
 // all dynamic input no need to pad chunked tokens
 var (
+	// inputs : [input_ids attention_mask token_type_ids] | model.Inputs() |
+	// ouputs : [last_hidden_state] | model.Outputs() | [-1 -1, 384]
+	MiniLM ModelID = ModelID{"sentence-transformers/all-MiniLM-L6-v2", "onnx/model.onnx", 384}
 	// inputs : [input_ids attention_mask token_type_ids]
-	MiniLM ModelCfg = ModelCfg{"sentence-transformers/all-MiniLM-L6-v2", "onnx/model.onnx", 384}
+	// ouputs : [last_hidden_state] | model.Outputs() | [-1 -1, 768]
+	E5LargeV2 ModelID = ModelID{"intfloat/e5-large-v2", "onnx/model.onnx", 1024}
 	// inputs : [input_ids attention_mask token_type_ids]
-	E5LargeV2 ModelCfg = ModelCfg{"intfloat/e5-large-v2", "onnx/model.onnx", 1024}
-	// inputs : [input_ids attention_mask token_type_ids]
-	E5BaseV2 ModelCfg = ModelCfg{"intfloat/e5-base-v2", "onnx/model.onnx", 768}
+	// ouputs : [last_hidden_state] | model.Outputs() | [-1 -1, 1024]
+	E5BaseV2 ModelID = ModelID{"intfloat/e5-base-v2", "onnx/model.onnx", 768}
 )
 
 type metadata struct {
@@ -61,7 +64,7 @@ type Embedder struct {
 // provide supported model id declared here
 // this model needs to support onnx
 // set backend to use with GOMLX_BACKEND env
-func New(cfg ModelCfg) (*Embedder, error) {
+func New(cfg ModelID) (*Embedder, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -108,9 +111,7 @@ func New(cfg ModelCfg) (*Embedder, error) {
 		return nil, err
 	}
 
-	//! match input nmes
-	inputName, _ := model.Inputs()
-	fmt.Println(inputName)
+	// currently all supported Models [input_ids, attention_mask, token_type_id]
 	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, inputIds, attentionMask, tokenTypeIds *graph.Node) []*graph.Node {
 		return model.CallGraph(ctx, inputIds.Graph(), map[string]*graph.Node{
 			"input_ids":      inputIds,
@@ -149,21 +150,30 @@ func (e *Embedder) Shape() []int {
 
 // overlap .1 or .2 of token
 // generates embedding
-func (e *Embedder) Generate(text string) (string, error) {
+func (e *Embedder) Generate(text string) ([][]float32, error) {
 	chunks, err := e.encodeChunked(text)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	tensor, err := e.exec.Exec(chunks, buildAttentionMasks(chunks, e.meta.padID), buildTokenTypeIds(len(chunks), len(chunks[0])))
+	// current expecting only 1 output to be returned
+	masks := buildAttentionMasks(chunks, e.meta.padID)
+	tensor, err := e.exec.Exec1(chunks, masks, buildTokenTypeIds(len(chunks), len(chunks[0])))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	fmt.Println(tensor)
-	// need to implement mean pooling
+	tknEmbeddings, ok := tensor.Value().([][][]float32)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast model output to [][][]float32")
+	}
 
-	return "", nil
+	embeddings := make([][]float32, len(tknEmbeddings))
+	for idx, tknE := range tknEmbeddings {
+		embeddings[idx] = normalize(meanPool(tknE, masks[idx]))
+	}
+
+	return embeddings, nil
 }
 
 func (e *Embedder) encodeChunked(text string) ([][]int, error) {
@@ -275,4 +285,45 @@ func chunkWithOverlap(set []int, chunkSize, overlap int, beginID, endID, padID i
 	}
 
 	return chunked, nil
+}
+
+func meanPool(tknEmbeddings [][]float32, mask []int) []float32 {
+	hiddenSize := len(tknEmbeddings[0])
+	pooled := make([]float32, hiddenSize)
+
+	var count float32
+	for tIdx, token := range tknEmbeddings {
+		if mask[tIdx] == 0 {
+			continue
+		}
+
+		for idx, v := range token {
+			pooled[idx] += v
+		}
+
+		count++
+	}
+
+	for i := range hiddenSize {
+		pooled[i] /= count
+	}
+
+	return pooled
+}
+
+// L2 Normalization | Unit Vector Normalization
+func normalize(sets []float32) []float32 {
+	var sum float64
+	for _, x := range sets {
+		fx := float64(x)
+		sum += fx * fx
+	}
+
+	norm := float32(math.Sqrt(sum))
+
+	for i := range sets {
+		sets[i] /= norm
+	}
+
+	return sets
 }

@@ -52,6 +52,9 @@ func TestChuckWithOverlapShouldCreateChunksWithValidOverlap(t *testing.T) {
 	if lc[0] != beginID || lc[len(lc)-1] != endID {
 		t.Fatalf("Expected last chunk to start and end with valida begin and end token expected begin,end=%d,%d | got begin,end=%d,%d", beginID, endID, lc[0], lc[len(lc)-1])
 	}
+	if len(lc) == 0 {
+		t.Fatalf("Expected final chunk to contain some tokens besides bos and eos but got empty")
+	}
 
 	lc = lc[1 : len(lc)-1]
 	if len(lc) < overlap {
