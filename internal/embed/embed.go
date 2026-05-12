@@ -143,11 +143,6 @@ func (e *Embedder) Dim() int {
 	return e.meta.outputDim
 }
 
-func (e *Embedder) Shape() []int {
-	_, shapes := e.model.Outputs()
-	return shapes[0].Dimensions
-}
-
 // overlap .1 or .2 of token
 // generates embedding
 func (e *Embedder) Generate(text string) ([][]float32, error) {
