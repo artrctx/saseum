@@ -26,7 +26,8 @@ e.g.) {OG_TABLE}_vector_`,
 		cobra.CheckErr(err)
 		defer serv.Close()
 
-		_, err = serv.Prepare(vecCfg.target)
+		// get vector size from embedder
+		_, err = serv.Prepare(vecCfg.target, 300)
 		cobra.CheckErr(err)
 
 		// embedder, err := embed.New()
