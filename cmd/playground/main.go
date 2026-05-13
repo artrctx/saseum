@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	e, err := embed.New(embed.MiniLM)
+	e, err := embed.New(embed.AllMiniLM)
 	if err != nil {
 		panic(err)
 	}

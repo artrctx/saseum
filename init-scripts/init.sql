@@ -1,1 +1,0 @@
-CREATE TABLE IF NOT EXISTS testset (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), data text not null);

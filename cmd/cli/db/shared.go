@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"saseum/internal/config"
 	"saseum/internal/db/pg"
+	"saseum/internal/embed"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -22,19 +23,20 @@ const (
 	SslMode  DBFlag = "sslMode"
 )
 
-func registerDatabaseConfig(cmd *cobra.Command) {
+func registerDatabaseFlags(cmd *cobra.Command) {
 	// connStr will take priority
 	cmd.Flags().String(ConnStr, "", "Connection string to postgres database")
 
-	cmd.Flags().StringP(Database, "d", "", "Database name")
-	cmd.Flags().StringP(Username, "u", "", "Database username")
-	cmd.Flags().StringP(Host, "H", "", "Database host")
-	cmd.Flags().Uint16P(Port, "p", 0, "Database port")
+	cmd.Flags().StringP(Database, "d", "postgres", "Database name")
+	cmd.Flags().StringP(Username, "u", "postgres", "Database username")
+	// cmd.MarkFlagRequired(Username)
+	cmd.Flags().StringP(Host, "h", "localhost", "Database host")
+	cmd.Flags().Uint16P(Port, "p", 5432, "Database port")
 	cmd.Flags().StringP(Schema, "s", "", "Database port")
 	cmd.Flags().String(SslMode, "prefer", "Database ssl mode")
 }
 
-func connStrFromFlag(cmd *cobra.Command) (string, error) {
+func connStrFromFlags(cmd *cobra.Command) (string, error) {
 	flags := cmd.Flags()
 
 	connStr, _ := flags.GetString(ConnStr)
@@ -70,4 +72,43 @@ func connStrFromFlag(cmd *cobra.Command) (string, error) {
 	}
 
 	return connStr, nil
+}
+
+type VectorizationConfig struct {
+	modelID embed.ModelID
+	target  string
+}
+
+func registerVectorizationFlags(cmd *cobra.Command) {
+	cmd.Flags().StringP("model", "m", embed.E5BaseV2.ID, fmt.Sprintf("Embedding model to use. (supports: %s | %s | %s)", embed.E5BaseV2.ID, embed.E5LargeV2.ID, embed.AllMiniLM.ID))
+	cmd.Flags().StringP("target", "t", "", "Target database table to be vectorized")
+	cmd.MarkFlagRequired("target")
+}
+
+func vectorizationConfigFromFlags(cmd *cobra.Command) (*VectorizationConfig, error) {
+	flags := cmd.Flags()
+
+	model, err := flags.GetString("model")
+	if err != nil {
+		return nil, err
+	}
+
+	var modelID embed.ModelID
+	switch model {
+	case embed.E5BaseV2.ID:
+		modelID = embed.E5BaseV2
+	case embed.E5LargeV2.ID:
+		modelID = embed.E5LargeV2
+	case embed.AllMiniLM.ID:
+		modelID = embed.AllMiniLM
+	default:
+		return nil, fmt.Errorf("provided model (%s) is not supported", model)
+	}
+
+	target, err := flags.GetString("target")
+	if target == "" {
+		return nil, fmt.Errorf("expected target to be provided but got=%s", target)
+	}
+
+	return &VectorizationConfig{modelID, target}, nil
 }

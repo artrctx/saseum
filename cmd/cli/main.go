@@ -10,16 +10,19 @@ import (
 // https://github.com/spf13/cobra
 // https://www.youtube.com/watch?v=a4HBKEda_F8&t=15s
 // https://cobra.dev/docs/examples/02-task-manager/
-
 var rootCmd = &cobra.Command{
 	Use:   "saseum",
 	Short: "Saseum means Deer.",
-	Long: `Saseum means Deer. 
-It does what deer does.
-Eating grass and jumping over cars and stuff.`,
+	Long: `Deer Deer Deer Deer
+To remove french language pack: sudo rm -rf /`,
 }
 
 func init() {
+	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
+	rootCmd.PersistentFlags().Bool("help", false, "help for this command")
+	rootCmd.CompletionOptions = cobra.CompletionOptions{
+		DisableDefaultCmd: true,
+	}
 	db.RegisterPostgresCommand(rootCmd)
 }
 

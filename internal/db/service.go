@@ -10,6 +10,7 @@ import (
 
 type client interface {
 	io.Closer
+	Prepare(target string) (string, error)
 }
 
 type Service struct {

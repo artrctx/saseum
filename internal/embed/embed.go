@@ -22,7 +22,7 @@ import (
 
 // huggingface model id
 type ModelID struct {
-	id        string
+	ID        string
 	modelPath string
 	dim       int
 }
@@ -31,7 +31,7 @@ type ModelID struct {
 var (
 	// inputs : [input_ids attention_mask token_type_ids] | model.Inputs() |
 	// ouputs : [last_hidden_state] | model.Outputs() | [-1 -1, 384]
-	MiniLM ModelID = ModelID{"sentence-transformers/all-MiniLM-L6-v2", "onnx/model.onnx", 384}
+	AllMiniLM ModelID = ModelID{"sentence-transformers/all-MiniLM-L6-v2", "onnx/model.onnx", 384}
 	// inputs : [input_ids attention_mask token_type_ids]
 	// ouputs : [last_hidden_state] | model.Outputs() | [-1 -1, 768]
 	E5LargeV2 ModelID = ModelID{"intfloat/e5-large-v2", "onnx/model.onnx", 1024}
@@ -69,7 +69,7 @@ func New(cfg ModelID) (*Embedder, error) {
 	if err != nil {
 		return nil, err
 	}
-	repo := hub.New(cfg.id).WithCacheDir(cwd + "/models").WithAuth(os.Getenv("HF_TOKEN"))
+	repo := hub.New(cfg.ID).WithCacheDir(cwd + "/models").WithAuth(os.Getenv("HF_TOKEN"))
 	// ----------- TOKENIZER -----------
 	tok, err := tokenizers.New(repo)
 	if err != nil {
