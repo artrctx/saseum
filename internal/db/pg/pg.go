@@ -30,17 +30,26 @@ func New(connStr string) (*Client, error) {
 	return &Client{conn}, nil
 }
 
-type TableMeta struct {
+func (c *Client) Close() error {
+	return c.db.Close()
+}
+
+type ColumnInfo struct {
+	Name       string `db:"column_name"`
+	DataType   string `db:"data_type"`
+	IsNullable bool   `db:"is_nullable"`
+	IsPK       bool   `db:"is_pk"`
 }
 
 // returns created vector table name or error
-func (c *Client) Prepare(target string) (string, error) {
-	pkQuery := `
-    SELECT 
-        c.column_name, 
-        c.data_type, 
-        c.is_nullable,
-        CASE WHEN pk.column_name IS NOT NULL THEN 'YES' ELSE 'NO' END as is_pk
+func (c *Client) Prepare(target string, vecSize int) (string, error) {
+	schema, err := c.getCurrentSchema()
+	if err != nil {
+		return "", err
+	}
+	rows, err := c.db.Queryx(
+		`SELECT c.column_name, c.data_type, (c.is_nullable::boolean) as is_nullable,
+        (pk.column_name IS NOT NULL) as is_pk
     FROM information_schema.columns c
     LEFT JOIN (
         SELECT ku.table_schema, ku.table_name, ku.column_name
@@ -52,25 +61,34 @@ func (c *Client) Prepare(target string) (string, error) {
         AND c.table_name = pk.table_name 
         AND c.column_name = pk.column_name
     WHERE c.table_schema = $1 AND c.table_name = $2
-    ORDER BY c.ordinal_position;`
-
-	rows, err := c.db.Query(pkQuery, "postgres", target)
+    ORDER BY c.ordinal_position;`, schema, target)
 	if err != nil {
 		return "", err
 	}
+	defer rows.Close()
 
-	fmt.Println("\nROW----")
+	var cols []ColumnInfo
 	for rows.Next() {
-		rowVal := make(map[string]any)
-		err := rows.Scan(rowVal)
+		var col ColumnInfo
+		err := rows.StructScan(&col)
 		if err != nil {
 			return "", err
 		}
-		fmt.Println(rowVal, "no count?")
+		cols = append(cols, col)
 	}
+	if len(cols) == 0 {
+		return "", fmt.Errorf("target table does not exists")
+	}
+	fmt.Println(cols)
+	// vecTableName := fmt.Sprintf("%s_vector_", target)
+	// vecTableQuery := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (embedding vector(%d))`, vecTableName, vecSize)
 	return "", nil
 }
 
-func (c *Client) Close() error {
-	return c.db.Close()
+func (c *Client) getCurrentSchema() (string, error) {
+	var schema string
+	if err := c.db.QueryRow("SELECT current_schema()").Scan(&schema); err != nil {
+		return "", err
+	}
+	return schema, nil
 }

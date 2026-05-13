@@ -23,6 +23,7 @@ const (
 	SslMode  DBFlag = "sslMode"
 )
 
+// made it postgres specific might want to change when mysql gets implemnetd
 func registerDatabaseFlags(cmd *cobra.Command) {
 	// connStr will take priority
 	cmd.Flags().String(ConnStr, "", "Connection string to postgres database")
@@ -32,7 +33,7 @@ func registerDatabaseFlags(cmd *cobra.Command) {
 	// cmd.MarkFlagRequired(Username)
 	cmd.Flags().StringP(Host, "h", "localhost", "Database host")
 	cmd.Flags().Uint16P(Port, "p", 5432, "Database port")
-	cmd.Flags().StringP(Schema, "s", "", "Database port")
+	cmd.Flags().StringP(Schema, "s", "public", "Database port")
 	cmd.Flags().String(SslMode, "prefer", "Database ssl mode")
 }
 
@@ -55,6 +56,8 @@ func connStrFromFlags(cmd *cobra.Command) (string, error) {
 		// ask password
 		fmt.Print("Enter Password:")
 		pswd, err := term.ReadPassword(syscall.Stdin)
+		// adding line break after password enter
+		fmt.Print("\n")
 		if err != nil {
 			return "", fmt.Errorf("Failed reading password error=%s", err)
 		}

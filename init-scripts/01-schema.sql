@@ -33,3 +33,6 @@ CREATE INDEX idx_book_metadata ON book USING gin (metadata);
 
 -- Optimized for deep JSON queries
 CREATE TABLE order_item (order_id INT, item_id INT, quantity INT, PRIMARY KEY (order_id, item_id));
+
+-- Optimized for deep JSON queries
+CREATE TABLE pizza (id UUID, item_id INT, price INT, PRIMARY KEY (id, item_id));

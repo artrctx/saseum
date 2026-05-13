@@ -10,7 +10,7 @@ import (
 
 type client interface {
 	io.Closer
-	Prepare(target string) (string, error)
+	Prepare(target string, vecSize int) (string, error)
 }
 
 type Service struct {
