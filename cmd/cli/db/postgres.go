@@ -1,7 +1,9 @@
 package db
 
 import (
+	"fmt"
 	"saseum/internal/db"
+	"saseum/internal/embed"
 
 	"github.com/spf13/cobra"
 )
@@ -26,11 +28,13 @@ e.g.) {OG_TABLE}_vector_`,
 		cobra.CheckErr(err)
 		defer serv.Close()
 
+		embedder, err := embed.New(vecCfg.modelID)
+
 		// get vector size from embedder
-		_, err = serv.Prepare(vecCfg.target, 300)
+		vecTable, err := serv.Prepare(vecCfg.target, embedder.Dim())
 		cobra.CheckErr(err)
 
-		// embedder, err := embed.New()
+		fmt.Println(vecTable, "table name")
 	},
 }
 
