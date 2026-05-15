@@ -1,7 +1,10 @@
 package pg
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
+	"saseum/internal/db/util"
 	"strings"
 )
 
@@ -12,18 +15,24 @@ type ColumnInfo struct {
 	IsPK       bool   `db:"is_pk"`
 }
 
-// returns created vector table name or error | name will be {taget}_embedding__
+// returns created vector table name or error | name will be {taget}_embedding
 // list as a primary key wont be supported
 // embedding col will be indexed with Hierarchical Navigable Small World (HNSW)
 // m = 16 (default, opt 24, 32) | maximum number of bidirectional links (connections)
 // ef_construction = 64 (default, opt 128, 256) |  size of the dynamic candidate list
 // using vector_ip_ops since passed vector will be normalized
 // NOTE: SET hnsw.ef_search = 100; -- High accuracy: set to 128 or 256 when querying embedding table
-// ! TODO: MAYBE RETURN TABLE STRUCT INSTEAD
-func (c *Client) Prepare(target string, vecSize int) (string, error) {
+func (c *Client) Prepare(target string, vecSize int, clean bool) (embeddingtable *util.Table, err error) {
+	vecTableName := fmt.Sprintf("%s_embedding", target)
+
+	existingTable, err := c.tableExists(vecTableName)
+	if err != nil {
+		return nil, err
+	}
+
 	primaryCols, err := c.getPrimaryColumnInfos(target)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	pLen := len(primaryCols)
@@ -35,7 +44,23 @@ func (c *Client) Prepare(target string, vecSize int) (string, error) {
 		pColNameSet[idx] = col.Name
 	}
 
-	vecTableName := fmt.Sprintf("%s_embedding__", target)
+	tx, err := c.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	// switching to named return
+	defer func() {
+		if txErr := tx.Rollback(); txErr != nil && !errors.Is(txErr, sql.ErrTxDone) {
+			err = errors.Join(err, txErr)
+		}
+	}()
+
+	if clean {
+		if err = existingTable.Delete(tx); err != nil {
+			return nil, fmt.Errorf("Failed to delete existing table %s with err: %w", vecTableName, err)
+		}
+	}
+
 	hswnM, hswnEfConstruction := getHnswValue(vecSize)
 	tQuery := fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS %s (
@@ -44,14 +69,29 @@ embedding vector(%d),%s,
 FOREIGN KEY (%s) REFERENCES %s(%s));
 CREATE INDEX ON %s USING hnsw (embedding vector_ip_ops) WITH (m = %d, ef_construction = %d);
 `, vecTableName, vecSize, strings.Join(colSet, ","), strings.Join(colNameSet, ","), target, strings.Join(pColNameSet, ","), vecTableName, hswnM, hswnEfConstruction)
-	if _, err := c.db.Exec(tQuery); err != nil {
-		return "", err
+	if _, err := tx.Exec(tQuery); err != nil {
+		return nil, err
 	}
 
-	return vecTableName, nil
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return util.NewTable(vecTableName, c.db), nil
 }
 
-func (c *Client) getCurrentSchema() (string, error) {
+func (c *Client) tableExists(table string) (*util.Table, error) {
+	var res sql.NullString
+	if err := c.db.QueryRow("SELECT to_regclass($1)", table).Scan(&res); err != nil {
+		return nil, err
+	}
+	if !res.Valid {
+		return nil, nil
+	}
+	return util.NewTable(res.String, c.db), nil
+}
+
+func (c *Client) currentSchema() (string, error) {
 	var schema string
 	if err := c.db.QueryRow("SELECT current_schema()").Scan(&schema); err != nil {
 		return "", err
@@ -60,7 +100,7 @@ func (c *Client) getCurrentSchema() (string, error) {
 }
 
 func (c *Client) getColumnInfos(table string) ([]ColumnInfo, error) {
-	schema, err := c.getCurrentSchema()
+	schema, err := c.currentSchema()
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +142,7 @@ func (c *Client) getColumnInfos(table string) ([]ColumnInfo, error) {
 }
 
 func (c *Client) getPrimaryColumnInfos(table string) ([]ColumnInfo, error) {
-	schema, err := c.getCurrentSchema()
+	schema, err := c.currentSchema()
 	if err != nil {
 		return nil, err
 	}

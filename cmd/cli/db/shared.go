@@ -77,18 +77,22 @@ func connStrFromFlags(cmd *cobra.Command) (string, error) {
 	return connStr, nil
 }
 
-type VectorizationConfig struct {
+type ExecOpt struct {
 	modelID embed.ModelID
 	target  string
+	clean   bool
+	watch   bool
 }
 
 func registerVectorizationFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("model", "m", embed.E5BaseV2.ID, fmt.Sprintf("Embedding model to use. (supports: %s | %s | %s)", embed.E5BaseV2.ID, embed.E5LargeV2.ID, embed.AllMiniLM.ID))
 	cmd.Flags().StringP("target", "t", "", "Target database table to be vectorized")
+	cmd.Flags().BoolP("clean", "c", false, "Truncate and recreate table if already exists")
+	cmd.Flags().BoolP("watch", "w", false, "Start testing interface after processing")
 	cmd.MarkFlagRequired("target")
 }
 
-func vectorizationConfigFromFlags(cmd *cobra.Command) (*VectorizationConfig, error) {
+func vectorizationConfigFromFlags(cmd *cobra.Command) (*ExecOpt, error) {
 	flags := cmd.Flags()
 
 	model, err := flags.GetString("model")
@@ -113,5 +117,15 @@ func vectorizationConfigFromFlags(cmd *cobra.Command) (*VectorizationConfig, err
 		return nil, fmt.Errorf("expected target to be provided but got=%s", target)
 	}
 
-	return &VectorizationConfig{modelID, target}, nil
+	clean, err := flags.GetBool("clean")
+	if err != nil {
+		return nil, err
+	}
+
+	watch, err := flags.GetBool("watch")
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExecOpt{modelID, target, clean, watch}, nil
 }

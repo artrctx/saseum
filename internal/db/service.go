@@ -5,12 +5,13 @@ import (
 	"io"
 	"log/slog"
 	"saseum/internal/db/pg"
+	"saseum/internal/db/util"
 	"strings"
 )
 
 type client interface {
 	io.Closer
-	Prepare(target string, vecSize int) (string, error)
+	Prepare(target string, vecSize int, clean bool) (*util.Table, error)
 }
 
 type Service struct {
@@ -26,6 +27,7 @@ func New(connStr string) (*Service, error) {
 	case "postgresql", "postgres":
 		client, err = pg.New(connStr)
 		// TODO: Add in mysql support when ready
+		// NOTE: Might be able to combine all in one service
 		// "github.com/go-sql-driver/mysql"
 	case "mysql":
 	default:

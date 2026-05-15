@@ -30,11 +30,10 @@ e.g.) {OG_TABLE}_vector_`,
 
 		embedder, err := embed.New(vecCfg.modelID)
 
-		// get vector size from embedder
-		vecTable, err := serv.Prepare(vecCfg.target, embedder.Dim())
+		vecTable, err := serv.Prepare(vecCfg.target, embedder.Dim(), vecCfg.clean)
 		cobra.CheckErr(err)
 
-		fmt.Println(vecTable, "table name")
+		fmt.Println(vecTable.Name(), "table name")
 	},
 }
 
