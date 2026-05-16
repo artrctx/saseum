@@ -11,7 +11,7 @@ import (
 
 type client interface {
 	io.Closer
-	Prepare(target string, vecSize int, clean bool) (*util.Table, error)
+	Prepare(target string, vecSize int, clean bool) (util.EmbeddingTable, error)
 }
 
 type Service struct {
