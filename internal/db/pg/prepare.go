@@ -11,13 +11,6 @@ import (
 const EmbeddingColumnName string = "embedding"
 const EmbeddingTablePostfix string = "emb"
 
-type ColumnInfo struct {
-	Name       string `db:"column_name"`
-	DataType   string `db:"data_type"`
-	IsNullable bool   `db:"is_nullable"`
-	IsPK       bool   `db:"is_pk"`
-}
-
 // returns created vector table name or error | name will be {taget}_emb
 // list as a primary key wont be supported
 // embedding col will be indexed with Hierarchical Navigable Small World (HNSW)
@@ -59,7 +52,7 @@ func (c *Client) Prepare(target string, vecDim int, clean bool) (embeddingtable 
 		}
 	}
 
-	primaryCols, err := c.getPrimaryColumnInfos(target)
+	primaryCols, err := getPrimaryColumnInfos(c.db, target)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +83,7 @@ CREATE INDEX ON %s USING hnsw (embedding vector_ip_ops) WITH (m = %d, ef_constru
 		return nil, err
 	}
 
-	return &EmbeddingTable{src: target, name: vecTableName}, nil
+	return &EmbeddingTable{src: target, name: vecTableName, db: c.db}, nil
 }
 
 // this assumes embedding column name is embedding
@@ -102,7 +95,7 @@ func (c *Client) embeddingColDimension(table, embeddingColName string) (int, err
 	return dimension, nil
 }
 
-// pass source table to inclu
+// if no table exists it will return nil. check fo nil
 func (c *Client) embeddingTableExists(table string) (*EmbeddingTable, error) {
 	vecTableName := embeddingTableName(table)
 
@@ -114,99 +107,7 @@ func (c *Client) embeddingTableExists(table string) (*EmbeddingTable, error) {
 		return nil, nil
 	}
 
-	return &EmbeddingTable{src: table, name: vecTableName}, nil
-}
-
-func (c *Client) currentSchema() (string, error) {
-	var schema string
-	if err := c.db.QueryRow("SELECT current_schema()").Scan(&schema); err != nil {
-		return "", err
-	}
-	return schema, nil
-}
-
-func (c *Client) getColumnInfos(table string) ([]ColumnInfo, error) {
-	schema, err := c.currentSchema()
-	if err != nil {
-		return nil, err
-	}
-	rows, err := c.db.Queryx(
-		`SELECT c.column_name, c.data_type, (c.is_nullable::boolean) as is_nullable,
-        (pk.column_name IS NOT NULL) as is_pk
-    FROM information_schema.columns c
-    LEFT JOIN (
-        SELECT ku.table_schema, ku.table_name, ku.column_name
-        FROM information_schema.key_column_usage ku
-        JOIN information_schema.table_constraints tc 
-          ON ku.constraint_name = tc.constraint_name
-        WHERE tc.constraint_type = 'PRIMARY KEY'
-    ) pk ON c.table_schema = pk.table_schema 
-        AND c.table_name = pk.table_name 
-        AND c.column_name = pk.column_name
-    WHERE c.table_schema = $1 AND c.table_name = $2
-    ORDER BY c.ordinal_position;`, schema, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var cols []ColumnInfo
-	for rows.Next() {
-		var col ColumnInfo
-		err := rows.StructScan(&col)
-		if err != nil {
-			return nil, err
-		}
-
-		cols = append(cols, col)
-	}
-
-	if len(cols) == 0 {
-		return nil, fmt.Errorf("target table does not exists")
-	}
-	return cols, nil
-}
-
-func (c *Client) getPrimaryColumnInfos(table string) ([]ColumnInfo, error) {
-	schema, err := c.currentSchema()
-	if err != nil {
-		return nil, err
-	}
-	rows, err := c.db.Queryx(
-		`SELECT c.column_name, c.data_type, (c.is_nullable::boolean) as is_nullable,
-        (pk.column_name IS NOT NULL) as is_pk
-    FROM information_schema.columns c
-    LEFT JOIN (
-        SELECT ku.table_schema, ku.table_name, ku.column_name
-        FROM information_schema.key_column_usage ku 
-        JOIN information_schema.table_constraints tc 
-          ON ku.constraint_name = tc.constraint_name
-        WHERE tc.constraint_type = 'PRIMARY KEY'
-    ) pk ON c.table_schema = pk.table_schema 
-        AND c.table_name = pk.table_name 
-        AND c.column_name = pk.column_name
-    WHERE pk.column_name IS NOT NULL AND c.table_schema = $1 AND c.table_name = $2
-    ORDER BY c.ordinal_position;`, schema, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var primaryCols []ColumnInfo
-	for rows.Next() {
-		var col ColumnInfo
-		err := rows.StructScan(&col)
-		if err != nil {
-			return nil, err
-		}
-		primaryCols = append(primaryCols, col)
-	}
-
-	if len(primaryCols) == 0 {
-		return nil, fmt.Errorf("target table does not exists or does not have primary keys")
-	}
-
-	return primaryCols, nil
+	return &EmbeddingTable{src: table, name: vecTableName, db: c.db}, nil
 }
 
 // returns (m, ef_construction)util.EmbeddingTable
