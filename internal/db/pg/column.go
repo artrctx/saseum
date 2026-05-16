@@ -80,7 +80,7 @@ func getPrimaryColumnInfos(db *sqlx.DB, table string) ([]ColumnInfo, error) {
 	}
 	defer rows.Close()
 
-	var primaryCols []ColumnInfo
+	primaryCols := []ColumnInfo{}
 	for rows.Next() {
 		var col ColumnInfo
 		err := rows.StructScan(&col)

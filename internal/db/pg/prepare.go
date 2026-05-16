@@ -83,7 +83,7 @@ CREATE INDEX ON %s USING hnsw (embedding vector_ip_ops) WITH (m = %d, ef_constru
 		return nil, err
 	}
 
-	return &EmbeddingTable{src: target, name: vecTableName, db: c.db}, nil
+	return &EmbeddingTable{srcName: target, name: vecTableName, db: c.db}, nil
 }
 
 // this assumes embedding column name is embedding
@@ -107,7 +107,7 @@ func (c *Client) embeddingTableExists(table string) (*EmbeddingTable, error) {
 		return nil, nil
 	}
 
-	return &EmbeddingTable{src: table, name: vecTableName, db: c.db}, nil
+	return &EmbeddingTable{srcName: table, name: vecTableName, db: c.db}, nil
 }
 
 // returns (m, ef_construction)util.EmbeddingTable

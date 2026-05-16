@@ -35,3 +35,5 @@ tmp
 
 # downloaded model path
 /models
+
+.venv
