@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const EmbeddingColumnName string = "embedding"
+
 type ColumnInfo struct {
 	Name       string `db:"column_name"`
 	DataType   string `db:"data_type"`
@@ -22,12 +24,40 @@ type ColumnInfo struct {
 // ef_construction = 64 (default, opt 128, 256) |  size of the dynamic candidate list
 // using vector_ip_ops since passed vector will be normalized
 // NOTE: SET hnsw.ef_search = 100; -- High accuracy: set to 128 or 256 when querying embedding table
-func (c *Client) Prepare(target string, vecSize int, clean bool) (embeddingtable *util.Table, err error) {
+func (c *Client) Prepare(target string, vecDim int, clean bool) (embeddingtable *util.Table, err error) {
 	vecTableName := fmt.Sprintf("%s_embedding", target)
 
 	existingTable, err := c.tableExists(vecTableName)
 	if err != nil {
 		return nil, err
+	}
+	tx, err := c.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	// switching to named return
+	defer func() {
+		if txErr := tx.Rollback(); txErr != nil && !errors.Is(txErr, sql.ErrTxDone) {
+			err = errors.Join(err, txErr)
+		}
+	}()
+
+	if existingTable != nil {
+		// if table exists and clean request delete else check existing table embedding dimension and return
+		if clean {
+			if err = existingTable.Delete(tx); err != nil {
+				return nil, fmt.Errorf("Failed to delete existing table %s with err: %w", vecTableName, err)
+			}
+		} else {
+			tDim, err := c.embeddingColDimension(vecTableName, EmbeddingColumnName)
+			if err != nil {
+				return nil, err
+			}
+			if tDim != vecDim {
+				return nil, fmt.Errorf("embedding table already exists for %s (%s); existsing table vector col (%s) dimension is %d but requested dim is %d", target, vecTableName, EmbeddingColumnName, tDim, vecDim)
+			}
+			return existingTable, nil
+		}
 	}
 
 	primaryCols, err := c.getPrimaryColumnInfos(target)
@@ -44,31 +74,14 @@ func (c *Client) Prepare(target string, vecSize int, clean bool) (embeddingtable
 		pColNameSet[idx] = col.Name
 	}
 
-	tx, err := c.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	// switching to named return
-	defer func() {
-		if txErr := tx.Rollback(); txErr != nil && !errors.Is(txErr, sql.ErrTxDone) {
-			err = errors.Join(err, txErr)
-		}
-	}()
-
-	if clean {
-		if err = existingTable.Delete(tx); err != nil {
-			return nil, fmt.Errorf("Failed to delete existing table %s with err: %w", vecTableName, err)
-		}
-	}
-
-	hswnM, hswnEfConstruction := getHnswValue(vecSize)
+	hswnM, hswnEfConstruction := getHnswValue(vecDim)
 	tQuery := fmt.Sprintf(`
-CREATE TABLE IF NOT EXISTS %s (
+CREATE TABLE %s (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-embedding vector(%d),%s,
+%s vector(%d),%s,
 FOREIGN KEY (%s) REFERENCES %s(%s));
 CREATE INDEX ON %s USING hnsw (embedding vector_ip_ops) WITH (m = %d, ef_construction = %d);
-`, vecTableName, vecSize, strings.Join(colSet, ","), strings.Join(colNameSet, ","), target, strings.Join(pColNameSet, ","), vecTableName, hswnM, hswnEfConstruction)
+`, vecTableName, EmbeddingColumnName, vecDim, strings.Join(colSet, ","), strings.Join(colNameSet, ","), target, strings.Join(pColNameSet, ","), vecTableName, hswnM, hswnEfConstruction)
 	if _, err := tx.Exec(tQuery); err != nil {
 		return nil, err
 	}
@@ -78,6 +91,15 @@ CREATE INDEX ON %s USING hnsw (embedding vector_ip_ops) WITH (m = %d, ef_constru
 	}
 
 	return util.NewTable(vecTableName, c.db), nil
+}
+
+// this assumes embedding column name is embedding
+func (c *Client) embeddingColDimension(table, embeddingColName string) (int, error) {
+	var dimension int
+	if err := c.db.QueryRow(`SELECT atttypmod AS dimensions FROM pg_attribute WHERE attname = $1 AND attrelid = $2::regclass;`, embeddingColName, table).Scan(&dimension); err != nil {
+		return 0, err
+	}
+	return dimension, nil
 }
 
 func (c *Client) tableExists(table string) (*util.Table, error) {
