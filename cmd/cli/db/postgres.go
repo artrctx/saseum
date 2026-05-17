@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"saseum/internal/db"
 	"saseum/internal/embed"
@@ -30,10 +31,17 @@ e.g.) {OG_TABLE}_vector_`,
 
 		embedder, err := embed.New(vecCfg.modelID)
 
-		vecTable, err := serv.Prepare(vecCfg.target, embedder.Dim(), vecCfg.clean)
+		embTable, err := serv.Prepare(vecCfg.target, embedder.Dim(), vecCfg.clean)
 		cobra.CheckErr(err)
 
-		fmt.Println(vecTable.Name(), "table name")
+		fmt.Printf("Processing %s table to %s embedding table.\n", vecCfg.target, embTable.Name())
+
+		// TODO: SUPPORT TIME OUT
+		count, err := embTable.Sync(context.Background(), embedder)
+		cobra.CheckErr(err)
+
+		fmt.Printf("Syncing concluded with %d entry.\n", count)
+		// Should add watch functionality
 	},
 }
 

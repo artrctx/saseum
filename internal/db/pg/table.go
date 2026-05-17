@@ -1,12 +1,19 @@
 package pg
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"math"
+	"saseum/internal/db/util"
 	"saseum/internal/embed"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
+	"golang.org/x/sync/errgroup"
 )
+
+const BatchSize int = 100
 
 type EmbeddingTable struct {
 	// src table name
@@ -27,29 +34,42 @@ func (et *EmbeddingTable) DeleteWithTx(tx *sql.Tx) error {
 }
 
 // syncs embedding between src
-func (et *EmbeddingTable) Sync(emb *embed.Embedder) error {
+func (et *EmbeddingTable) Sync(ctx context.Context, emb *embed.Embedder) (count int, err error) {
 	etMap, err := et.GetSourceTableMap()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(etMap) == 0 {
-		return fmt.Errorf("embedding table(%s) and src table(%s) doesn't have any foreign relation", et.name, et.srcName)
+		return 0, fmt.Errorf("embedding table(%s) and src table(%s) doesn't have any foreign relation", et.name, et.srcName)
 	}
-	var srcCount int
-	if err := et.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s;", et.srcName)).Scan(&srcCount); err != nil {
-		return err
+
+	if err := et.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s;", et.srcName)).Scan(&count); err != nil {
+		return 0, err
 	}
-	if srcCount == 0 {
-		return nil
+	if count == 0 {
+		return 0, nil
 	}
-	//! Current will seriealize whole rows in future might wnat to allow users to pick cols
-	// I'm just going to pull all rows. In the future might want to offset and run queries seperately
-	rows, err := et.db.Queryx(fmt.Sprintf("SELECT * FROM %s;", et.srcName))
+
+	eg, ctx := errgroup.WithContext(ctx)
+	for idx := range int(math.Ceil(float64(count) / float64(BatchSize))) {
+		eg.Go(func() error {
+			return et.SyncOffset(ctx, emb, etMap[0].PrimaryColumn, BatchSize, idx*BatchSize)
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return 0, err
+	}
+
+	return
+}
+
+func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, orderKey string, limit, offset int) error {
+	rows, err := et.db.Queryx(fmt.Sprintf("SELECT * FROM %s ORDER BY %s ASC LIMIT $1 OFFSET $2;", et.srcName, orderKey), limit, offset)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	fmt.Printf("table %s have %d entries", et.srcName, srcCount)
 	entries := []map[string]any{}
 	for rows.Next() {
 		entry := make(map[string]any)
@@ -58,8 +78,24 @@ func (et *EmbeddingTable) Sync(emb *embed.Embedder) error {
 		}
 		entries = append(entries, entry)
 	}
-	fmt.Printf("table %s pulled %d entries", et.srcName, len(entries))
-	//TODO: pull src table rows should chunk and insert into embedding with embedder
+	fmt.Println(len(entries), "TEST")
+
+	entryLen := len(entries)
+	entryStrs := make([]string, entryLen)
+	for idx := range len(entryStrs) {
+		entryStrs[idx] = util.MapToReadableStr(entries[idx])
+	}
+
+	embs, err := emb.Generate(strings.Join(entryStrs, "\n\n"))
+	if err != nil {
+		return err
+	}
+
+	if len(embs) != entryLen {
+		return fmt.Errorf("Embedding returned wrong size. expected %d entries go %d embedding", entryLen, len(embs))
+	}
+	//TODO insert into table
+	//TODO embedding takes long there should be ways to send progress msg
 
 	return nil
 }
@@ -86,7 +122,6 @@ JOIN information_schema.key_column_usage kcu1 ON rc.constraint_name = kcu1.const
 JOIN information_schema.key_column_usage kcu2 ON rc.unique_constraint_name = kcu2.constraint_name
     AND kcu1.ordinal_position = kcu2.ordinal_position
 WHERE kcu1.table_name = $1;`, et.name)
-
 	if err != nil {
 		return nil, err
 	}
