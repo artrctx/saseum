@@ -3,6 +3,7 @@ package pg
 import (
 	"database/sql"
 	"fmt"
+	"saseum/internal/embed"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -26,7 +27,7 @@ func (et *EmbeddingTable) DeleteWithTx(tx *sql.Tx) error {
 }
 
 // syncs embedding between src
-func (et *EmbeddingTable) Sync() error {
+func (et *EmbeddingTable) Sync(emb *embed.Embedder) error {
 	etMap, err := et.GetSourceTableMap()
 	if err != nil {
 		return err
@@ -34,6 +35,30 @@ func (et *EmbeddingTable) Sync() error {
 	if len(etMap) == 0 {
 		return fmt.Errorf("embedding table(%s) and src table(%s) doesn't have any foreign relation", et.name, et.srcName)
 	}
+	var srcCount int
+	if err := et.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s;", et.srcName)).Scan(&srcCount); err != nil {
+		return err
+	}
+	if srcCount == 0 {
+		return nil
+	}
+	//! Current will seriealize whole rows in future might wnat to allow users to pick cols
+	// I'm just going to pull all rows. In the future might want to offset and run queries seperately
+	rows, err := et.db.Queryx(fmt.Sprintf("SELECT * FROM %s;", et.srcName))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	fmt.Printf("table %s have %d entries", et.srcName, srcCount)
+	entries := []map[string]any{}
+	for rows.Next() {
+		entry := make(map[string]any)
+		if err := rows.MapScan(entry); err != nil {
+			return err
+		}
+		entries = append(entries, entry)
+	}
+	fmt.Printf("table %s pulled %d entries", et.srcName, len(entries))
 	//TODO: pull src table rows should chunk and insert into embedding with embedder
 
 	return nil
