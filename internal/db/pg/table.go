@@ -15,7 +15,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const BatchSize int = 2
+const BatchSize int = 10
 
 type EmbeddingTable struct {
 	// src table name
@@ -57,9 +57,6 @@ func (et *EmbeddingTable) Sync(ctx context.Context, emb *embed.Embedder) (count 
 	eg, ctx := errgroup.WithContext(ctx)
 	writeCount := atomic.Int64{}
 	for idx := range int(math.Ceil(float64(count) / float64(BatchSize))) {
-		if idx > 1 {
-			continue
-		}
 		eg.Go(func() error {
 			fmt.Printf("start syncing rows %d-%d\n", idx*BatchSize, idx*BatchSize+BatchSize)
 			count, err := et.SyncOffset(ctx, emb, etMap, BatchSize, idx*BatchSize)
@@ -145,10 +142,9 @@ func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, t
 			}
 			mappedCols[idx] = fmt.Sprintf("%v", colVal)
 		}
-		mappedCols[len(tMap)] = fmt.Sprintf("'%v'", embs[idx])
+		mappedCols[len(tMap)] = fmt.Sprintf("'%v'", util.ToEmbeddingStr(embs[idx]))
 		insertValues[idx] = "(" + strings.Join(mappedCols, ",") + ")"
 	}
-	fmt.Println(insertValues[0])
 
 	fkCols := make([]string, len(tMap)+1)
 	for i, m := range tMap {
@@ -156,8 +152,6 @@ func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, t
 	}
 	fkCols[len(tMap)] = EmbeddingColumnName
 
-	fmt.Println(fmt.Sprintf("INSERT INTO %s(%s) VALUES %s;", et.name, strings.Join(fkCols, ","), strings.Join(insertValues, ",")))
-	return 0, nil
 	r, err := et.db.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s(%s) VALUES %s;", et.name, strings.Join(fkCols, ","), strings.Join(insertValues, ",")))
 	if err != nil {
 		return 0, err

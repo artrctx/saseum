@@ -71,3 +71,14 @@ func ToValidInsertValue(val any) (any, error) {
 		return nil, fmt.Errorf("unsupported database datatype: %T", v)
 	}
 }
+
+func ToEmbeddingStr(e []float32) string {
+	var es strings.Builder
+	for idx, v := range e {
+		if idx > 0 {
+			es.WriteString(",")
+		}
+		es.WriteString(fmt.Sprintf("%f", v))
+	}
+	return fmt.Sprintf("[%s]", es.String())
+}
