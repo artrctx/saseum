@@ -6,13 +6,15 @@ import (
 )
 
 func main() {
-	e, err := embed.New(embed.AllMiniLM)
+	e, err := embed.New(embed.AllMiniLM, 5)
 	if err != nil {
 		panic(err)
 	}
-	val, err := e.Generate("This is an example sentence\n\nEach sentence is converted")
-	if err != nil {
-		panic(err)
+	r := <-e.Queue("This is an example sentence\n\nEach sentence is converted")
+
+	if r.Error != nil {
+		panic(r.Error)
 	}
-	fmt.Println(len(val))
+
+	fmt.Println(len(r.Data), len(r.Data[0]))
 }

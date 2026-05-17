@@ -29,7 +29,7 @@ e.g.) {OG_TABLE}_vector_`,
 		cobra.CheckErr(err)
 		defer serv.Close()
 
-		embedder, err := embed.New(vecCfg.modelID)
+		embedder, err := embed.New(vecCfg.modelID, 10)
 
 		embTable, err := serv.Prepare(vecCfg.target, embedder.Dim(), vecCfg.clean)
 		cobra.CheckErr(err)

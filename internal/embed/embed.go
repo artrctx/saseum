@@ -49,14 +49,70 @@ type metadata struct {
 	chunkOverlap float32
 }
 
+type Result struct {
+	Data  [][]float32
+	Error error
+}
+type Task struct {
+	input  string
+	result chan Result
+}
+
+func inferenceWorker(tokenizer tokenizers.Tokenizer, meta metadata, backend compute.Backend, model onnx.Model, execCtx *context.Context, tasks <-chan Task) error {
+	exec, err := context.NewExec(backend, execCtx, func(ctx *context.Context, inputIds, attentionMask, tokenTypeIds *graph.Node) []*graph.Node {
+		return model.CallGraph(ctx, inputIds.Graph(), map[string]*graph.Node{
+			"input_ids":      inputIds,
+			"attention_mask": attentionMask,
+			"token_type_ids": tokenTypeIds,
+		})
+	})
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		defer exec.Finalize()
+		for task := range tasks {
+			chunks, err := encodeChunked(task.input, tokenizer, meta)
+			if err != nil {
+				task.result <- Result{Error: err}
+				continue
+			}
+
+			// current expecting only 1 output to be returned
+			masks := buildAttentionMasks(chunks, meta.padID)
+			tensor, err := exec.Exec1(chunks, masks, buildTokenTypeIds(len(chunks), len(chunks[0])))
+			if err != nil {
+				task.result <- Result{Error: err}
+				continue
+			}
+
+			tknEmbeddings, ok := tensor.Value().([][][]float32)
+			if !ok {
+				task.result <- Result{Error: fmt.Errorf("failed to cast model output to [][][]float32")}
+				continue
+			}
+
+			embeddings := make([][]float32, len(tknEmbeddings))
+			for idx, tknE := range tknEmbeddings {
+				embeddings[idx] = normalize(meanPool(tknE, masks[idx]))
+			}
+
+			task.result <- Result{Data: embeddings}
+		}
+	}()
+
+	return nil
+}
+
 // https://github.com/gomlx/onnx-gomlx
 // https://github.com/gomlx/go-huggingface
 type Embedder struct {
 	hub       *hub.Repo
 	model     onnx.Model
-	exec      *context.Exec
 	tokenizer tokenizers.Tokenizer
 	meta      metadata
+	queue     chan Task
 }
 
 // TODO: if files downloaded i should be able to skip downloading tokenizer.json and model
@@ -64,7 +120,7 @@ type Embedder struct {
 // provide supported model id declared here
 // this model needs to support onnx
 // set backend to use with GOMLX_BACKEND env
-func New(cfg ModelID) (*Embedder, error) {
+func New(cfg ModelID, workerCount uint) (*Embedder, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -110,32 +166,37 @@ func New(cfg ModelID) (*Embedder, error) {
 		model.Close()
 		return nil, err
 	}
-
-	// currently all supported Models [input_ids, attention_mask, token_type_id]
-	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, inputIds, attentionMask, tokenTypeIds *graph.Node) []*graph.Node {
-		return model.CallGraph(ctx, inputIds.Graph(), map[string]*graph.Node{
-			"input_ids":      inputIds,
-			"attention_mask": attentionMask,
-			"token_type_ids": tokenTypeIds,
-		})
-	})
-	if err != nil {
-		model.Close()
-		return nil, err
-	}
-
-	return &Embedder{repo, model, exec, tok, metadata{
+	metadata := metadata{
 		outputDim:    cfg.dim,
 		maxTokenLen:  float32(tok.Config().ModelMaxLength),
 		padID:        padID,
 		beginID:      beginID,
 		endID:        endID,
 		chunkOverlap: 0.1,
-	}}, nil
+	}
+
+	if workerCount == 0 {
+		// default 5 workers
+		workerCount = 5
+	}
+	taskQueues := make(chan Task, 100)
+	eg := errgroup.Group{}
+	for range workerCount {
+		eg.Go(func() error {
+			return inferenceWorker(tok, metadata, backend, model, ctx, taskQueues)
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		model.Close()
+		return nil, err
+	}
+
+	return &Embedder{repo, model, tok, metadata, taskQueues}, nil
 }
 
 func (e *Embedder) Close() error {
-	e.exec.Finalize()
+	close(e.queue)
 	return e.model.Close()
 }
 
@@ -143,42 +204,20 @@ func (e *Embedder) Dim() int {
 	return e.meta.outputDim
 }
 
-// overlap .1 or .2 of token
-// generates embedding
-func (e *Embedder) Generate(text string) ([][]float32, error) {
-	chunks, err := e.encodeChunked(text)
-	if err != nil {
-		return nil, err
-	}
-
-	// current expecting only 1 output to be returned
-	masks := buildAttentionMasks(chunks, e.meta.padID)
-	tensor, err := e.exec.Exec1(chunks, masks, buildTokenTypeIds(len(chunks), len(chunks[0])))
-	if err != nil {
-		return nil, err
-	}
-
-	tknEmbeddings, ok := tensor.Value().([][][]float32)
-	if !ok {
-		return nil, fmt.Errorf("failed to cast model output to [][][]float32")
-	}
-
-	embeddings := make([][]float32, len(tknEmbeddings))
-	for idx, tknE := range tknEmbeddings {
-		embeddings[idx] = normalize(meanPool(tknE, masks[idx]))
-	}
-
-	return embeddings, nil
+func (e *Embedder) Queue(text string) <-chan Result {
+	t := Task{input: text, result: make(chan Result)}
+	e.queue <- t
+	return t.result
 }
 
-func (e *Embedder) encodeChunked(text string) ([][]int, error) {
+func encodeChunked(text string, tokenizer tokenizers.Tokenizer, meta metadata) ([][]int, error) {
 	sChunks := semanticChunks(text)
 
 	g := errgroup.Group{}
 	chunkChan := make(chan [][]int, len(sChunks))
 	for _, s := range sChunks {
 		g.Go(func() error {
-			chunks, err := chunkWithOverlap(e.tokenizer.Encode(s), int(e.meta.maxTokenLen), int(e.meta.maxTokenLen*e.meta.chunkOverlap), e.meta.beginID, e.meta.endID, e.meta.padID)
+			chunks, err := chunkWithOverlap(tokenizer.Encode(s), int(meta.maxTokenLen), int(meta.maxTokenLen*meta.chunkOverlap), meta.beginID, meta.endID, meta.padID)
 			if err != nil {
 				return err
 			}

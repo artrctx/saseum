@@ -8,12 +8,13 @@ import (
 	"saseum/internal/db/util"
 	"saseum/internal/embed"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"golang.org/x/sync/errgroup"
 )
 
-const BatchSize int = 100
+const BatchSize int = 10
 
 type EmbeddingTable struct {
 	// src table name
@@ -50,6 +51,7 @@ func (et *EmbeddingTable) Sync(ctx context.Context, emb *embed.Embedder) (count 
 		return 0, nil
 	}
 
+	startTime := time.Now()
 	eg, ctx := errgroup.WithContext(ctx)
 	for idx := range int(math.Ceil(float64(count) / float64(BatchSize))) {
 		eg.Go(func() error {
@@ -60,6 +62,7 @@ func (et *EmbeddingTable) Sync(ctx context.Context, emb *embed.Embedder) (count 
 	if err := eg.Wait(); err != nil {
 		return 0, err
 	}
+	fmt.Printf("Took: %v\n", time.Since(startTime))
 
 	return
 }
@@ -78,24 +81,26 @@ func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, o
 		}
 		entries = append(entries, entry)
 	}
-	fmt.Println(len(entries), "TEST")
-
 	entryLen := len(entries)
 	entryStrs := make([]string, entryLen)
 	for idx := range len(entryStrs) {
 		entryStrs[idx] = util.MapToReadableStr(entries[idx])
 	}
 
-	embs, err := emb.Generate(strings.Join(entryStrs, "\n\n"))
-	if err != nil {
-		return err
+	result := <-emb.Queue(strings.Join(entryStrs, "\n\n"))
+	if result.Error != nil {
+		return result.Error
 	}
 
+	embs := result.Data
 	if len(embs) != entryLen {
 		return fmt.Errorf("Embedding returned wrong size. expected %d entries go %d embedding", entryLen, len(embs))
 	}
+
+	fmt.Println("Processed book: ", offset)
+
 	//TODO insert into table
-	//TODO embedding takes long there should be ways to send progress msg
+	//Check if table with id existing before processing
 
 	return nil
 }
