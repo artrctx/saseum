@@ -8,13 +8,14 @@ import (
 	"saseum/internal/db/util"
 	"saseum/internal/embed"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 	"golang.org/x/sync/errgroup"
 )
 
-const BatchSize int = 10
+const BatchSize int = 2
 
 type EmbeddingTable struct {
 	// src table name
@@ -35,7 +36,8 @@ func (et *EmbeddingTable) DeleteWithTx(tx *sql.Tx) error {
 }
 
 // syncs embedding between src
-func (et *EmbeddingTable) Sync(ctx context.Context, emb *embed.Embedder) (count int, err error) {
+// TODO: Provide notificiation channel to provide ways to send progress
+func (et *EmbeddingTable) Sync(ctx context.Context, emb *embed.Embedder) (count int64, err error) {
 	etMap, err := et.GetSourceTableMap()
 	if err != nil {
 		return 0, err
@@ -53,9 +55,19 @@ func (et *EmbeddingTable) Sync(ctx context.Context, emb *embed.Embedder) (count 
 
 	startTime := time.Now()
 	eg, ctx := errgroup.WithContext(ctx)
+	writeCount := atomic.Int64{}
 	for idx := range int(math.Ceil(float64(count) / float64(BatchSize))) {
+		if idx > 1 {
+			continue
+		}
 		eg.Go(func() error {
-			return et.SyncOffset(ctx, emb, etMap[0].PrimaryColumn, BatchSize, idx*BatchSize)
+			fmt.Printf("start syncing rows %d-%d\n", idx*BatchSize, idx*BatchSize+BatchSize)
+			count, err := et.SyncOffset(ctx, emb, etMap, BatchSize, idx*BatchSize)
+			if err == nil {
+				fmt.Printf("Synced rows %d-%d\n", idx*BatchSize, idx*BatchSize+BatchSize)
+			}
+			writeCount.Add(count)
+			return err
 		})
 	}
 
@@ -64,23 +76,49 @@ func (et *EmbeddingTable) Sync(ctx context.Context, emb *embed.Embedder) (count 
 	}
 	fmt.Printf("Took: %v\n", time.Since(startTime))
 
-	return
+	return writeCount.Load(), nil
 }
 
-func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, orderKey string, limit, offset int) error {
-	rows, err := et.db.Queryx(fmt.Sprintf("SELECT * FROM %s ORDER BY %s ASC LIMIT $1 OFFSET $2;", et.srcName, orderKey), limit, offset)
+// ASSUMES ALL foreign keys values int, string, or bool
+// returns affected row count
+func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, tMap []EmbeddingTableMap, limit, offset int) (int64, error) {
+	rows, err := et.db.Queryx(fmt.Sprintf("SELECT * FROM %s ORDER BY %s ASC LIMIT $1 OFFSET $2;", et.srcName, tMap[0].PrimaryColumn), limit, offset)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer rows.Close()
 	entries := []map[string]any{}
 	for rows.Next() {
 		entry := make(map[string]any)
 		if err := rows.MapScan(entry); err != nil {
-			return err
+			return 0, err
 		}
+		mappedCols := make([]string, len(tMap))
+
+		for idx, m := range tMap {
+			calVal, err := util.ToValidDBValue(entry[m.PrimaryColumn])
+			if err != nil {
+				return 0, err
+			}
+			mappedCols[idx] = fmt.Sprintf("%s=%v", m.SrcColumn, calVal)
+		}
+
+		var rCount int
+		if err := et.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", et.name, strings.Join(mappedCols, " AND "))).Scan(&rCount); err != nil {
+			return 0, err
+		}
+		// if row already exists skip
+		if rCount != 0 {
+			continue
+		}
+
 		entries = append(entries, entry)
 	}
+
+	if len(entries) == 0 {
+		return 0, nil
+	}
+
 	entryLen := len(entries)
 	entryStrs := make([]string, entryLen)
 	for idx := range len(entryStrs) {
@@ -89,20 +127,43 @@ func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, o
 
 	result := <-emb.Queue(strings.Join(entryStrs, "\n\n"))
 	if result.Error != nil {
-		return result.Error
+		return 0, result.Error
 	}
 
 	embs := result.Data
 	if len(embs) != entryLen {
-		return fmt.Errorf("Embedding returned wrong size. expected %d entries go %d embedding", entryLen, len(embs))
+		return 0, fmt.Errorf("Embedding returned wrong size. expected %d entries go %d embedding", entryLen, len(embs))
 	}
 
-	fmt.Println("Processed book: ", offset)
+	insertValues := make([]string, entryLen)
+	for idx, e := range entries {
+		mappedCols := make([]string, len(tMap)+1)
+		for idx, m := range tMap {
+			colVal, err := util.ToValidInsertValue(e[m.PrimaryColumn])
+			if err != nil {
+				return 0, err
+			}
+			mappedCols[idx] = fmt.Sprintf("%v", colVal)
+		}
+		mappedCols[len(tMap)] = fmt.Sprintf("'%v'", embs[idx])
+		insertValues[idx] = "(" + strings.Join(mappedCols, ",") + ")"
+	}
+	fmt.Println(insertValues[0])
 
-	//TODO insert into table
-	//Check if table with id existing before processing
+	fkCols := make([]string, len(tMap)+1)
+	for i, m := range tMap {
+		fkCols[i] = m.SrcColumn
+	}
+	fkCols[len(tMap)] = EmbeddingColumnName
 
-	return nil
+	fmt.Println(fmt.Sprintf("INSERT INTO %s(%s) VALUES %s;", et.name, strings.Join(fkCols, ","), strings.Join(insertValues, ",")))
+	return 0, nil
+	r, err := et.db.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s(%s) VALUES %s;", et.name, strings.Join(fkCols, ","), strings.Join(insertValues, ",")))
+	if err != nil {
+		return 0, err
+	}
+
+	return r.RowsAffected()
 }
 
 type EmbeddingTableMap struct {
@@ -117,7 +178,7 @@ type EmbeddingTableMap struct {
 
 func (et *EmbeddingTable) GetSourceTableMap() ([]EmbeddingTableMap, error) {
 	rows, err := et.db.Queryx(`SELECT 
-    rc.constraint_name AS foreign_key_name,
+    
     kcu1.table_name AS source_table,
     kcu1.column_name AS source_column,
     kcu2.table_name AS primary_table,

@@ -79,6 +79,7 @@ func connStrFromFlags(cmd *cobra.Command) (string, error) {
 
 type ExecOpt struct {
 	modelID embed.ModelID
+	workers uint8
 	target  string
 	clean   bool
 	watch   bool
@@ -86,10 +87,13 @@ type ExecOpt struct {
 
 func registerVectorizationFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("model", "m", embed.E5BaseV2.ID, fmt.Sprintf("Embedding model to use. (supports: %s | %s | %s)", embed.E5BaseV2.ID, embed.E5LargeV2.ID, embed.AllMiniLM.ID))
+	cmd.Flags().Uint8("workers", 8, "inference worker count")
+
 	cmd.Flags().StringP("target", "t", "", "Target database table to be vectorized")
+	cmd.MarkFlagRequired("target")
+
 	cmd.Flags().BoolP("clean", "c", false, "Truncate and recreate table if already exists")
 	cmd.Flags().BoolP("watch", "w", false, "Start testing interface after processing")
-	cmd.MarkFlagRequired("target")
 }
 
 func vectorizationConfigFromFlags(cmd *cobra.Command) (*ExecOpt, error) {
@@ -112,6 +116,11 @@ func vectorizationConfigFromFlags(cmd *cobra.Command) (*ExecOpt, error) {
 		return nil, fmt.Errorf("provided model (%s) is not supported", model)
 	}
 
+	workers, err := flags.GetUint8("workers")
+	if err != nil {
+		return nil, err
+	}
+
 	target, err := flags.GetString("target")
 	if target == "" {
 		return nil, fmt.Errorf("expected target to be provided but got=%s", target)
@@ -127,5 +136,5 @@ func vectorizationConfigFromFlags(cmd *cobra.Command) (*ExecOpt, error) {
 		return nil, err
 	}
 
-	return &ExecOpt{modelID, target, clean, watch}, nil
+	return &ExecOpt{modelID, workers, target, clean, watch}, nil
 }

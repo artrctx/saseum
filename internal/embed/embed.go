@@ -120,7 +120,7 @@ type Embedder struct {
 // provide supported model id declared here
 // this model needs to support onnx
 // set backend to use with GOMLX_BACKEND env
-func New(cfg ModelID, workerCount uint) (*Embedder, error) {
+func New(cfg ModelID, workerCount uint8) (*Embedder, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
