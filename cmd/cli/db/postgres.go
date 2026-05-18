@@ -1,8 +1,10 @@
 package db
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"saseum/internal/db"
 	"saseum/internal/embed"
 
@@ -42,6 +44,36 @@ e.g.) {OG_TABLE}_vector_`,
 
 		fmt.Printf("Syncing concluded with %d entry.\n", count)
 		// Should add watch functionality
+		if vecCfg.watch {
+			fmt.Println("Type in your query(Ctrl + C or type q to quit):")
+			scanner := bufio.NewScanner(os.Stdin)
+
+			for {
+				fmt.Print("> ")
+				if !scanner.Scan() {
+					break
+				}
+
+				input := scanner.Text()
+				if input == "q" {
+					break
+				}
+
+				results, err := embTable.Query(embedder, input, vecCfg.resultLimit)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+
+				fmt.Println("--------RESUILT----------")
+				for idx, r := range results {
+					fmt.Printf("RESIULT %d\n", idx+1)
+					fmt.Println(r)
+				}
+				fmt.Println("-------END RESIULT--------")
+			}
+
+		}
 	},
 }
 

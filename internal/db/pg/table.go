@@ -136,7 +136,7 @@ func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, t
 	for idx, e := range entries {
 		mappedCols := make([]string, len(tMap)+1)
 		for idx, m := range tMap {
-			colVal, err := util.ToValidInsertValue(e[m.PrimaryColumn])
+			colVal, err := util.ToValidDBValue(e[m.PrimaryColumn])
 			if err != nil {
 				return 0, err
 			}
@@ -160,6 +160,66 @@ func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, t
 	return r.RowsAffected()
 }
 
+func (et *EmbeddingTable) Query(emb *embed.Embedder, text string, limit uint8) ([]map[string]any, error) {
+	result := <-emb.Queue(text)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	if len(result.Data) != 1 {
+		return nil, fmt.Errorf("resuilting embedding contained more than one dim. if you included two breaklines in input please remove those.")
+	}
+
+	tMap, err := et.GetSourceTableMap()
+	if err != nil {
+		return nil, err
+	}
+
+	colStr, srcColStr := "", ""
+	for idx, m := range tMap {
+		if idx > 0 {
+			colStr += ","
+			srcColStr += ","
+		}
+		colStr += m.SrcColumn
+		colStr += m.PrimaryColumn
+	}
+
+	embStr := util.ToEmbeddingStr(result.Data[1])
+	rows, err := et.db.Queryx(fmt.Sprintf("SELECT %s FROM %s ORDER BY <-> $1 limit $2", colStr, et.name), embStr, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	results := make([]map[string]any, 0, limit)
+	for rows.Next() {
+		var queryM map[string]any
+		if err := rows.StructScan(queryM); err != nil {
+			return nil, err
+		}
+
+		var mValue string
+		for idx, m := range tMap {
+			if idx > 0 {
+				mValue += " AND "
+			}
+			val, err := util.ToValidDBValue(queryM[m.SrcColumn])
+			if err != nil {
+				return nil, err
+			}
+			mValue += fmt.Sprintf("%s=%v", m.PrimaryColumn, val)
+		}
+
+		var r map[string]any
+		if err := et.db.QueryRowx(fmt.Sprintf("SELECT * FROM %s WHERE %s", et.srcName, mValue)).StructScan(r); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, nil
+}
+
 type EmbeddingTableMap struct {
 	ForeignKeyName string `db:"foreign_key_name"`
 	// embedding table
@@ -172,7 +232,6 @@ type EmbeddingTableMap struct {
 
 func (et *EmbeddingTable) GetSourceTableMap() ([]EmbeddingTableMap, error) {
 	rows, err := et.db.Queryx(`SELECT 
-    
     kcu1.table_name AS source_table,
     kcu1.column_name AS source_column,
     kcu2.table_name AS primary_table,

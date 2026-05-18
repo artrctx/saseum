@@ -41,3 +41,12 @@ make
 # adds vector.so to installed postgres
 sudo make install
 ```
+
+#### NOTE:
+
+[Check GoMLX ReadMe](https://github.com/gomlx/gomlx#-faq)
+
+```bash
+# to use nvidia
+export GOMLX_BACKEND="xla:cuda"
+```

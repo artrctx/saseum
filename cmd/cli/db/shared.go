@@ -78,11 +78,12 @@ func connStrFromFlags(cmd *cobra.Command) (string, error) {
 }
 
 type ExecOpt struct {
-	modelID embed.ModelID
-	workers uint8
-	target  string
-	clean   bool
-	watch   bool
+	modelID     embed.ModelID
+	workers     uint8
+	target      string
+	clean       bool
+	watch       bool
+	resultLimit uint8
 }
 
 func registerVectorizationFlags(cmd *cobra.Command) {
@@ -94,6 +95,7 @@ func registerVectorizationFlags(cmd *cobra.Command) {
 
 	cmd.Flags().BoolP("clean", "c", false, "Truncate and recreate table if already exists")
 	cmd.Flags().BoolP("watch", "w", false, "Start testing interface after processing")
+	cmd.Flags().Uint8("limit", 3, "Resuilt limit while watching")
 }
 
 func vectorizationConfigFromFlags(cmd *cobra.Command) (*ExecOpt, error) {
@@ -135,6 +137,10 @@ func vectorizationConfigFromFlags(cmd *cobra.Command) (*ExecOpt, error) {
 	if err != nil {
 		return nil, err
 	}
+	limit, err := flags.GetUint8("limit")
+	if err != nil {
+		return nil, err
+	}
 
-	return &ExecOpt{modelID, workers, target, clean, watch}, nil
+	return &ExecOpt{modelID, workers, target, clean, watch, limit}, nil
 }

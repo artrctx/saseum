@@ -11,12 +11,13 @@ type Client struct {
 	db *sqlx.DB
 }
 
+// TODO support users to set connection limit
 func New(connStr string) (*Client, error) {
 	conn, err := sqlx.Open("pgx", connStr)
 	if err != nil {
 		return nil, err
 	}
-
+	conn.SetMaxOpenConns(50)
 	// https://github.com/pgvector/pgvector/tree/master
 	// this checks connection and if pgvector is installed
 	if _, err := conn.Exec("CREATE EXTENSION IF NOT EXISTS vector"); err != nil {
