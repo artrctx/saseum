@@ -88,7 +88,7 @@ type ExecOpt struct {
 
 func registerVectorizationFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("model", "m", embed.E5BaseV2.ID, fmt.Sprintf("Embedding model to use. (supports: %s | %s | %s)", embed.E5BaseV2.ID, embed.E5LargeV2.ID, embed.AllMiniLM.ID))
-	cmd.Flags().Uint8("workers", 8, "inference worker count")
+	cmd.Flags().Uint8("workers", 16, "inference worker count")
 
 	cmd.Flags().StringP("target", "t", "", "Target database table to be vectorized")
 	cmd.MarkFlagRequired("target")
