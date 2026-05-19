@@ -182,27 +182,24 @@ func (et *EmbeddingTable) Query(emb *embed.Embedder, text string, limit uint8) (
 		return nil, err
 	}
 
-	colStr, srcColStr := "", ""
+	colStr := ""
 	for idx, m := range tMap {
 		if idx > 0 {
 			colStr += ","
-			srcColStr += ","
 		}
 		colStr += m.SrcColumn
-		colStr += m.PrimaryColumn
 	}
 
-	embStr := util.ToEmbeddingStr(result.Data[1])
-	rows, err := et.db.Queryx(fmt.Sprintf("SELECT %s FROM %s ORDER BY <-> $1 limit $2", colStr, et.name), embStr, limit)
+	embStr := util.ToEmbeddingStr(result.Data[0])
+	rows, err := et.db.Queryx(fmt.Sprintf("SELECT %s FROM %s ORDER BY %s <-> $1 limit $2", colStr, et.name, EmbeddingColumnName), embStr, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	results := make([]map[string]any, 0, limit)
+	embWheres := make([]string, 0, limit)
 	for rows.Next() {
-		var queryM map[string]any
-		if err := rows.StructScan(queryM); err != nil {
+		queryM := make(map[string]any)
+		if err := rows.MapScan(queryM); err != nil {
 			return nil, err
 		}
 
@@ -217,13 +214,28 @@ func (et *EmbeddingTable) Query(emb *embed.Embedder, text string, limit uint8) (
 			}
 			mValue += fmt.Sprintf("%s=%v", m.PrimaryColumn, val)
 		}
+		embWheres = append(embWheres, "("+mValue+")")
+	}
 
-		var r map[string]any
-		if err := et.db.QueryRowx(fmt.Sprintf("SELECT * FROM %s WHERE %s", et.srcName, mValue)).StructScan(r); err != nil {
+	// close early to free up pool
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	results := make([]map[string]any, 0, limit)
+	rows, err = et.db.Queryx(fmt.Sprintf("SELECT * FROM %s WHERE %s", et.srcName, strings.Join(embWheres, " OR ")))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		r := make(map[string]any)
+		if err := rows.MapScan(r); err != nil {
 			return nil, err
 		}
 		results = append(results, r)
 	}
+
 	return results, nil
 }
 

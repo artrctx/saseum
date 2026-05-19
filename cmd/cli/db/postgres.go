@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"saseum/internal/db"
+	"saseum/internal/db/util"
 	"saseum/internal/embed"
 
 	"github.com/spf13/cobra"
@@ -66,10 +67,11 @@ e.g.) {OG_TABLE}_vector_`,
 					continue
 				}
 
-				fmt.Println("--------RESUILT----------")
+				fmt.Println("--------RESULTS----------")
 				for idx, r := range results {
-					fmt.Printf("RESIULT %d\n", idx+1)
-					fmt.Println(r)
+					fmt.Printf("Result %d------\n", idx+1)
+					fmt.Println(util.MapToReadableStr(r))
+					fmt.Printf("\n\n")
 				}
 				fmt.Println("-------END RESIULT--------")
 			}
