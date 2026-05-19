@@ -33,14 +33,13 @@ CREATE INDEX idx_book_authors ON book USING gin (authors);
 -- Optimized for searching within arrays
 CREATE INDEX idx_book_metadata ON book USING gin (metadata);
 
--- Optimized for deep JSON queries
-Create TABLE book_emb (
-    book_id BIGSERIAL,
-    embedding vector (768),
-    PRIMARY KEY (book_id),
-    FOREIGN KEY (book_id) REFERENCES book (id)
-);
-
-CREATE INDEX ON book_emb USING hnsw (embedding vector_ip_ops)
-WITH
-    (m = 32, ef_construction = 128);
+-- -- Optimized for deep JSON queries
+-- Create TABLE book_emb (
+--     book_id BIGSERIAL,
+--     embedding vector (768),
+--     PRIMARY KEY (book_id),
+--     FOREIGN KEY (book_id) REFERENCES book (id)
+-- );
+-- CREATE INDEX ON book_emb USING hnsw (embedding vector_ip_ops)
+-- WITH
+--     (m = 32, ef_construction = 128);

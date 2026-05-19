@@ -12,6 +12,7 @@ type Client struct {
 }
 
 // TODO support users to set connection limit
+// TODO queries should have timeout
 func New(connStr string) (*Client, error) {
 	conn, err := sqlx.Open("pgx", connStr)
 	if err != nil {
