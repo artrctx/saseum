@@ -83,15 +83,22 @@ func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, t
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
-	entries := []map[string]any{}
+	entryPool := []map[string]any{}
 	for rows.Next() {
 		entry := make(map[string]any)
 		if err := rows.MapScan(entry); err != nil {
 			return 0, err
 		}
-		mappedCols := make([]string, len(tMap))
+		entryPool = append(entryPool, entry)
+	}
+	// manually close to relase pg conn pool
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
 
+	entries := []map[string]any{}
+	for _, entry := range entryPool {
+		mappedCols := make([]string, len(tMap))
 		for idx, m := range tMap {
 			calVal, err := util.ToValidDBValue(entry[m.PrimaryColumn])
 			if err != nil {
@@ -101,7 +108,7 @@ func (et *EmbeddingTable) SyncOffset(ctx context.Context, emb *embed.Embedder, t
 		}
 
 		var rCount int
-		if err := et.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", et.name, strings.Join(mappedCols, " AND "))).Scan(&rCount); err != nil {
+		if err := et.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s;", et.name, strings.Join(mappedCols, " AND "))).Scan(&rCount); err != nil {
 			return 0, err
 		}
 		// if row already exists skip
@@ -190,7 +197,7 @@ func (et *EmbeddingTable) Query(emb *embed.Embedder, text string, limit uint8) (
 	if err != nil {
 		return nil, err
 	}
-	rows.Close()
+	defer rows.Close()
 
 	results := make([]map[string]any, 0, limit)
 	for rows.Next() {

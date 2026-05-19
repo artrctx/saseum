@@ -17,7 +17,7 @@ func New(connStr string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn.SetMaxOpenConns(50)
+	conn.SetMaxOpenConns(75)
 	// https://github.com/pgvector/pgvector/tree/master
 	// this checks connection and if pgvector is installed
 	if _, err := conn.Exec("CREATE EXTENSION IF NOT EXISTS vector"); err != nil {

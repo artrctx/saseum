@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE book (
     -- Unique Identifiers
     id BIGSERIAL PRIMARY KEY,
@@ -32,7 +34,13 @@ CREATE INDEX idx_book_authors ON book USING gin (authors);
 CREATE INDEX idx_book_metadata ON book USING gin (metadata);
 
 -- Optimized for deep JSON queries
-CREATE TABLE order_item (order_id INT, item_id INT, quantity INT, PRIMARY KEY (order_id, item_id));
+Create TABLE book_emb (
+    book_id BIGSERIAL,
+    embedding vector (768),
+    PRIMARY KEY (book_id),
+    FOREIGN KEY (book_id) REFERENCES book (id)
+);
 
--- Optimized for deep JSON queries
-CREATE TABLE pizza (id UUID, item_id INT, price INT, PRIMARY KEY (id, item_id));
+CREATE INDEX ON book_emb USING hnsw (embedding vector_ip_ops)
+WITH
+    (m = 32, ef_construction = 128);
