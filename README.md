@@ -50,3 +50,7 @@ sudo make install
 # to use nvidia
 export GOMLX_BACKEND="xla:cuda"
 ```
+
+todo:
+- fix embedder model inference go routine need to create its own.
+- change order consistency of util func of map
