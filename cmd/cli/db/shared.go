@@ -78,17 +78,19 @@ func connStrFromFlags(cmd *cobra.Command) (string, error) {
 }
 
 type ExecOpt struct {
-	modelID     embed.ModelID
-	workers     uint8
-	target      string
-	clean       bool
-	watch       bool
-	resultLimit uint8
+	modelID   embed.ModelID
+	workers   uint8
+	target    string
+	clean     bool
+	watch     bool
+	limit     uint8
+	batchSize int
+	threshold float32
 }
 
 func registerVectorizationFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("model", "m", embed.E5BaseV2.ID, fmt.Sprintf("Embedding model to use. (supports: %s | %s | %s)", embed.E5BaseV2.ID, embed.E5LargeV2.ID, embed.AllMiniLM.ID))
-	cmd.Flags().Uint8("workers", 16, "inference worker count")
+	cmd.Flags().Uint8("workers", 4, "inference worker count")
 
 	cmd.Flags().StringP("target", "t", "", "Target database table to be vectorized")
 	cmd.MarkFlagRequired("target")
@@ -96,6 +98,8 @@ func registerVectorizationFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("clean", "c", false, "Truncate and recreate table if already exists")
 	cmd.Flags().BoolP("watch", "w", false, "Start testing interface after processing")
 	cmd.Flags().Uint8("limit", 3, "Resuilt limit while watching")
+	cmd.Flags().Int("batchSize", 20, "Processing batch size")
+	cmd.Flags().Float32("threshold", 0, "Threshold to be used while querying (between 0 to 1)")
 }
 
 func vectorizationConfigFromFlags(cmd *cobra.Command) (*ExecOpt, error) {
@@ -141,6 +145,14 @@ func vectorizationConfigFromFlags(cmd *cobra.Command) (*ExecOpt, error) {
 	if err != nil {
 		return nil, err
 	}
+	batchSize, err := flags.GetInt("batchSize")
+	if err != nil {
+		return nil, err
+	}
+	threshold, err := flags.GetFloat32("threshold")
+	if err != nil {
+		return nil, err
+	}
 
-	return &ExecOpt{modelID, workers, target, clean, watch, limit}, nil
+	return &ExecOpt{modelID, workers, target, clean, watch, limit, batchSize, threshold}, nil
 }

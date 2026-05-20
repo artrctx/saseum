@@ -5,14 +5,15 @@ import (
 	"database/sql"
 	"fmt"
 	"saseum/internal/embed"
+	"sort"
 	"strings"
 )
 
 type EmbeddingTable interface {
 	Name() string
 	DeleteWithTx(tx *sql.Tx) error
-	Sync(ctx context.Context, emb *embed.Embedder) (count int64, err error)
-	Query(emb *embed.Embedder, text string, limit uint8) ([]map[string]any, error)
+	Sync(ctx context.Context, emb *embed.Embedder, batchSize int) (count int64, err error)
+	Query(emb *embed.Embedder, text string, limit uint8, threshold float32) ([]map[string]any, error)
 }
 
 func MapToReadableStr(m map[string]any) string {
@@ -22,6 +23,8 @@ func MapToReadableStr(m map[string]any) string {
 		rs[idx] = fmt.Sprintf("%s:%v", k, ToReadableDBValue(v))
 		idx++
 	}
+	// keep the ordering consistent
+	sort.Strings(rs)
 	return strings.Join(rs, "\n")
 }
 

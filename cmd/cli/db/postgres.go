@@ -41,41 +41,43 @@ e.g.) {OG_TABLE}_vector_`,
 		fmt.Printf("Processing %s table to %s embedding table.\n", vecCfg.target, embTable.Name())
 
 		// TODO: SUPPORT TIME OUT
-		count, err := embTable.Sync(context.Background(), embedder)
+		count, err := embTable.Sync(context.Background(), embedder, vecCfg.batchSize)
 		cobra.CheckErr(err)
 
 		fmt.Printf("Syncing concluded with %d entry.\n", count)
-		// Should add watch functionality
-		if vecCfg.watch {
-			fmt.Println("Type in your query(Ctrl + C or type q to quit):")
-			scanner := bufio.NewScanner(os.Stdin)
+		// if no watch end of execution
+		if !vecCfg.watch {
+			return
+		}
+		fmt.Println("Type in your query(Ctrl + C or type q to quit):")
+		scanner := bufio.NewScanner(os.Stdin)
 
-			for {
-				fmt.Print("> ")
-				if !scanner.Scan() {
-					break
-				}
-
-				input := scanner.Text()
-				if input == "q" {
-					break
-				}
-
-				results, err := embTable.Query(embedder, input, vecCfg.resultLimit)
-				if err != nil {
-					fmt.Println(err)
-					continue
-				}
-
-				fmt.Println("--------RESULTS----------")
-				for idx, r := range results {
-					fmt.Printf("Result %d------\n", idx+1)
-					fmt.Println(util.MapToReadableStr(r))
-					fmt.Printf("\n\n")
-				}
-				fmt.Println("-------END RESIULT--------")
+		for {
+			fmt.Print("> ")
+			if !scanner.Scan() {
+				break
 			}
 
+			input := scanner.Text()
+			if input == "q" {
+				break
+			}
+
+			results, err := embTable.Query(embedder, input, vecCfg.limit, vecCfg.threshold)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+
+			if len(results) == 0 {
+				fmt.Println("------ NO RESULT ------")
+			} else {
+				for idx, r := range results {
+					fmt.Printf("--------RESULTS %d----------\n\n", idx+1)
+					fmt.Println(util.MapToReadableStr(r))
+					fmt.Print("\n\n-------END RESIULT--------\n")
+				}
+			}
 		}
 	},
 }

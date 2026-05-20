@@ -16,7 +16,6 @@ import (
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/ml/context"
-	"github.com/gomlx/onnx-gomlx/onnx"
 	onnxGomlx "github.com/gomlx/onnx-gomlx/onnx/parser"
 	"golang.org/x/sync/errgroup"
 )
@@ -51,16 +50,33 @@ type metadata struct {
 }
 
 type Result struct {
-	Data  [][]float32
-	Error error
+	ProducerID uint8
+	Data       [][]float32
+	Error      error
 }
 type Task struct {
 	input  string
 	result chan Result
 }
 
-func inferenceWorker(tokenizer tokenizers.Tokenizer, meta metadata, backend compute.Backend, model onnx.Model, execCtx *context.Context, tasks <-chan Task) error {
-	exec, err := context.NewExec(backend, execCtx, func(ctx *context.Context, inputIds, attentionMask, tokenTypeIds *graph.Node) []*graph.Node {
+// ? creating backend per worker unlike some suggestions
+// ? if you don't all request with tasks channel runs concurrently through one backend service
+func inferenceWorker(id uint8, modelPath string, tokenizer tokenizers.Tokenizer, meta metadata, tasks <-chan Task) error {
+	backend, err := compute.New()
+	if err != nil {
+		return err
+	}
+	ctx := context.New()
+	model, err := onnxGomlx.ParseFile(modelPath)
+	if err != nil {
+		return err
+	}
+
+	if err := model.VariablesToContext(ctx); err != nil {
+		model.Close()
+		return err
+	}
+	exec, err := context.NewExec(backend, ctx, func(ctx *context.Context, inputIds, attentionMask, tokenTypeIds *graph.Node) []*graph.Node {
 		return model.CallGraph(ctx, inputIds.Graph(), map[string]*graph.Node{
 			"input_ids":      inputIds,
 			"attention_mask": attentionMask,
@@ -68,15 +84,21 @@ func inferenceWorker(tokenizer tokenizers.Tokenizer, meta metadata, backend comp
 		})
 	})
 	if err != nil {
+		model.Close()
 		return err
 	}
 
 	go func() {
-		defer exec.Finalize()
+		defer func() {
+			exec.Finalize()
+			if err := model.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "model closing errored: %v", err)
+			}
+		}()
 		for task := range tasks {
 			chunks, err := encodeChunked(task.input, tokenizer, meta)
 			if err != nil {
-				task.result <- Result{Error: err}
+				task.result <- Result{ProducerID: id, Error: err}
 				continue
 			}
 
@@ -84,13 +106,13 @@ func inferenceWorker(tokenizer tokenizers.Tokenizer, meta metadata, backend comp
 			masks := buildAttentionMasks(chunks, meta.padID)
 			tensor, err := exec.Exec1(chunks, masks, buildTokenTypeIds(len(chunks), len(chunks[0])))
 			if err != nil {
-				task.result <- Result{Error: err}
+				task.result <- Result{ProducerID: id, Error: err}
 				continue
 			}
 
 			tknEmbeddings, ok := tensor.Value().([][][]float32)
 			if !ok {
-				task.result <- Result{Error: fmt.Errorf("failed to cast model output to [][][]float32")}
+				task.result <- Result{ProducerID: id, Error: fmt.Errorf("failed to cast model output to [][][]float32")}
 				continue
 			}
 
@@ -99,7 +121,7 @@ func inferenceWorker(tokenizer tokenizers.Tokenizer, meta metadata, backend comp
 				embeddings[idx] = normalize(meanPool(tknE, masks[idx]))
 			}
 
-			task.result <- Result{Data: embeddings}
+			task.result <- Result{ProducerID: id, Data: embeddings}
 		}
 	}()
 
@@ -110,7 +132,6 @@ func inferenceWorker(tokenizer tokenizers.Tokenizer, meta metadata, backend comp
 // https://github.com/gomlx/go-huggingface
 type Embedder struct {
 	hub       *hub.Repo
-	model     onnx.Model
 	tokenizer tokenizers.Tokenizer
 	meta      metadata
 	queue     chan Task
@@ -147,26 +168,12 @@ func New(cfg ModelID, workerCount uint8) (*Embedder, error) {
 	}
 
 	// ----------- MODEL & EXECUTOR -----------
-	backend, err := compute.New()
-	if err != nil {
-		return nil, err
-	}
-
 	//prep models
 	modelPath, err := repo.DownloadFile(cfg.modelPath)
 	if err != nil {
 		return nil, err
 	}
 
-	model, err := onnxGomlx.ParseFile(modelPath)
-	if err != nil {
-		return nil, err
-	}
-	ctx := context.New()
-	if err := model.VariablesToContext(ctx); err != nil {
-		model.Close()
-		return nil, err
-	}
 	metadata := metadata{
 		outputDim:    cfg.dim,
 		maxTokenLen:  float32(tok.Config().ModelMaxLength),
@@ -182,23 +189,22 @@ func New(cfg ModelID, workerCount uint8) (*Embedder, error) {
 	}
 	taskQueues := make(chan Task, 100)
 	eg := errgroup.Group{}
-	for range workerCount {
+	for idx := range workerCount {
 		eg.Go(func() error {
-			return inferenceWorker(tok, metadata, backend, model, ctx, taskQueues)
+			return inferenceWorker(idx, modelPath, tok, metadata, taskQueues)
 		})
 	}
 
 	if err := eg.Wait(); err != nil {
-		model.Close()
 		return nil, err
 	}
 
-	return &Embedder{repo, model, tok, metadata, taskQueues}, nil
+	return &Embedder{repo, tok, metadata, taskQueues}, nil
 }
 
 func (e *Embedder) Close() error {
 	close(e.queue)
-	return e.model.Close()
+	return nil
 }
 
 func (e *Embedder) Dim() int {

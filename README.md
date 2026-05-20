@@ -47,10 +47,8 @@ sudo make install
 [Check GoMLX ReadMe](https://github.com/gomlx/gomlx#-faq)
 
 ```bash
+# to make cpu exec async use xla:cpus
+export GOMLX_BACKEND="xla:cpu"
 # to use nvidia
 export GOMLX_BACKEND="xla:cuda"
 ```
-
-todo:
-- fix embedder model inference go routine need to create its own.
-- change order consistency of util func of map
